@@ -18,3 +18,8 @@ export type MatchResponse = {
   breakdown: ScoreBreakdown;
 };
 
+export type TailoredCvResponse = {
+  tailoredCv: string;
+  changesSummary: string[];
+  notes: string[];
+};

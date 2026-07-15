@@ -24,6 +24,21 @@ type EvaluationResponse = {
   breakdown: Breakdown;
 };
 
+type TailoredCvResponse = {
+  jobTitle: string | null;
+  tailoredCv: string;
+  changesSummary: string[];
+  notes: string[];
+};
+
+const BREAKDOWN_LABELS: Record<keyof Breakdown, string> = {
+  skills: "Skill match",
+  experience: "Experienta relevanta",
+  seniority: "Nivel / seniority",
+  domain: "Domeniu tehnic",
+  communication: "Colaborare"
+};
+
 async function extractTextFromPdf(file: File) {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "/api/pdf-worker";
@@ -52,8 +67,10 @@ export default function Home() {
   const [cvFileName, setCvFileName] = useState("");
   const [hasUploadedCv, setHasUploadedCv] = useState(false);
   const [result, setResult] = useState<EvaluationResponse | null>(null);
+  const [tailoredCvResult, setTailoredCvResult] = useState<TailoredCvResponse | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isTailoring, setIsTailoring] = useState(false);
   const [isReadingFile, setIsReadingFile] = useState(false);
 
   const apiBaseUrl = useMemo(
@@ -68,6 +85,8 @@ export default function Home() {
     setCv("");
     setCvFileName("");
     setHasUploadedCv(false);
+    setResult(null);
+    setTailoredCvResult(null);
 
     if (!file) {
       return;
@@ -121,6 +140,7 @@ export default function Home() {
     event.preventDefault();
     setIsLoading(true);
     setError("");
+    setTailoredCvResult(null);
 
     if (!hasUploadedCv || !cv) {
       setIsLoading(false);
@@ -156,6 +176,52 @@ export default function Home() {
       );
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function handleTailorCv() {
+    setError("");
+
+    if (!hasUploadedCv || !cv) {
+      setError("Incarca un CV PDF valid inainte sa generezi varianta adaptata.");
+      return;
+    }
+
+    if (jobDescription.trim().length < 50) {
+      setError("Adauga un job description suficient de clar inainte sa adaptezi CV-ul.");
+      return;
+    }
+
+    setIsTailoring(true);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/v1/tailor-cv`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jobTitle: jobTitle.trim() || undefined,
+          jobDescription,
+          cv,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Request failed.");
+      }
+
+      const payload = (await response.json()) as TailoredCvResponse;
+      setTailoredCvResult(payload);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Nu am putut genera CV-ul adaptat."
+      );
+    } finally {
+      setIsTailoring(false);
     }
   }
 
@@ -234,9 +300,18 @@ export default function Home() {
             <button
               className={styles.primaryButton}
               type="submit"
-              disabled={isLoading || isReadingFile}
+              disabled={isLoading || isReadingFile || isTailoring}
             >
               {isLoading ? "Evaluez..." : "Calculeaza potrivirea"}
+            </button>
+
+            <button
+              className={styles.secondaryButton}
+              type="button"
+              disabled={isLoading || isReadingFile || isTailoring}
+              onClick={handleTailorCv}
+            >
+              {isTailoring ? "Generez CV-ul adaptat..." : "Genereaza CV adaptat pe JD"}
             </button>
 
             {error ? <p className={styles.error}>{error}</p> : null}
@@ -249,6 +324,10 @@ export default function Home() {
                   <div>
                     <p className={styles.mutedLabel}>Scor general</p>
                     <h2>{result.matchScore}%</h2>
+                    <p className={styles.scoreHint}>
+                      Scorul combina acoperirea cerintelor tehnice, experienta,
+                      senioritatea, domeniul si semnalele de colaborare.
+                    </p>
                   </div>
                   <span className={styles.badge}>{verdictLabel}</span>
                 </div>
@@ -258,7 +337,7 @@ export default function Home() {
                 <div className={styles.breakdown}>
                   {Object.entries(result.breakdown).map(([key, value]) => (
                     <div className={styles.metric} key={key}>
-                      <span>{key}</span>
+                      <span>{BREAKDOWN_LABELS[key as keyof Breakdown]}</span>
                       <strong>{value}%</strong>
                     </div>
                   ))}
@@ -337,8 +416,64 @@ export default function Home() {
                   Dupa submit vei vedea scorul, breakdown-ul si principalele
                   gap-uri dintre CV si cerintele rolului.
                 </p>
+                <p>
+                  Separat, poti cere si o varianta de CV adaptata pe JD, fara sa
+                  rescrii complet documentul.
+                </p>
               </div>
             )}
+
+            {tailoredCvResult ? (
+              <div className={styles.tailorSection}>
+                <h3>CV adaptat de AI</h3>
+                <p className={styles.tailorIntro}>
+                  AI-ul a pastrat structura CV-ului si a incercat sa schimbe
+                  doar wording-ul relevant pentru acest JD.
+                </p>
+
+                <div className={styles.columns}>
+                  <div>
+                    <h3>Schimbari facute</h3>
+                    <ul>
+                      {tailoredCvResult.changesSummary.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h3>Atentie</h3>
+                    <ul>
+                      {tailoredCvResult.notes.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className={styles.tailorGrid}>
+                  <div>
+                    <p className={styles.mutedLabel}>CV original</p>
+                    <textarea
+                      readOnly
+                      value={cv}
+                      rows={16}
+                      className={styles.tailorArea}
+                    />
+                  </div>
+
+                  <div>
+                    <p className={styles.mutedLabel}>CV propus de AI</p>
+                    <textarea
+                      readOnly
+                      value={tailoredCvResult.tailoredCv}
+                      rows={16}
+                      className={styles.tailorArea}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </section>
         </section>
       </main>

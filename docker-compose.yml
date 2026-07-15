@@ -1,73 +1,66 @@
 services:
   ollama:
     image: ollama/ollama:latest
-    container_name: evaluate-cv-job-ollama
+    container_name: evaluate-cv-ollama
+    restart: unless-stopped
     ports:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 20s
+    networks:
+      - evaluate-network
 
   ollama-pull:
     image: ollama/ollama:latest
+    container_name: evaluate-cv-ollama-pull
+    restart: "no"
     depends_on:
-      ollama:
-        condition: service_healthy
+      - ollama
     environment:
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
-    entrypoint: ["/bin/sh", "-c"]
-    command: >
-      ollama pull "$OLLAMA_MODEL"
-    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until ollama list >/dev/null 2>&1; do
+          sleep 2
+        done
+        ollama pull qwen2.5:3b
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - evaluate-network
 
   backend:
-    build:
-      context: ./backend
-    container_name: evaluate-cv-job-backend
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:0.0.10
+    container_name: evaluate-cv-backend
+    restart: unless-stopped
     depends_on:
-      ollama:
-        condition: service_healthy
-      ollama-pull:
-        condition: service_completed_successfully
+      - ollama
+      - ollama-pull
     environment:
-      PORT: 8080
-      CORS_ORIGIN: http://localhost:3000
-      LOG_LEVEL: info
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+      OLLAMA_MODEL: qwen2.5:3b
+      OLLAMA_TIMEOUT_MS: 180000
     ports:
       - "8080:8080"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 20s
+    networks:
+      - evaluate-network
 
   frontend:
-    build:
-      context: ./frontend
-    container_name: evaluate-cv-job-frontend
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-frontend:0.0.10
+    container_name: evaluate-cv-frontend
+    restart: unless-stopped
     depends_on:
-      backend:
-        condition: service_healthy
-    environment:
-      PORT: 3000
-      API_BASE_URL: http://backend:8080
+      - backend
     ports:
-      - "3000:3000"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 20s
+      - "2026:3000"
+    networks:
+      - evaluate-network
+
+networks:
+  evaluate-network:
+    driver: bridge
 
 volumes:
   ollama-data:

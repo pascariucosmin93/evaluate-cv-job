@@ -1,40 +1,57 @@
 import { MatchResponse, ScoreBreakdown } from "../types.js";
 
-const KEYWORD_GROUPS: Record<string, string[]> = {
-  javascript: ["javascript", "js", "ecmascript"],
-  typescript: ["typescript", "ts"],
-  react: ["react", "react.js", "next.js", "nextjs"],
-  nextjs: ["next.js", "nextjs"],
-  node: ["node", "node.js", "nodejs", "express", "nest", "fastify"],
-  python: ["python", "fastapi", "django", "flask"],
-  java: ["java", "spring", "spring boot"],
-  dotnet: [".net", "c#", "asp.net"],
-  sql: ["sql", "postgres", "postgresql", "mysql", "mariadb", "sql server"],
-  nosql: ["mongodb", "redis", "elasticsearch", "dynamodb", "cassandra"],
-  docker: ["docker", "container", "containers"],
-  kubernetes: ["kubernetes", "k8s", "helm", "argo cd", "argocd"],
-  aws: ["aws", "ec2", "ecs", "eks", "lambda", "cloudformation"],
-  gcp: ["gcp", "google cloud", "gke", "bigquery"],
-  azure: ["azure", "aks", "functions"],
-  ci_cd: ["ci/cd", "ci cd", "github actions", "gitlab ci", "jenkins"],
-  testing: ["testing", "jest", "vitest", "cypress", "playwright", "unit test"],
-  api: ["api", "rest", "graphql", "microservices", "integration"],
-  leadership: ["leadership", "mentor", "mentoring", "team lead", "ownership"],
-  communication: ["communication", "stakeholder", "collaboration", "cross-functional"],
-  english: ["english", "engleza", "fluent english", "business english"],
-  remote: ["remote", "distributed", "hybrid"]
+type KeywordDefinition = {
+  aliases: string[];
+  category: "core" | "supporting";
 };
 
-const SENIORITY_HINTS = [
-  "intern",
-  "junior",
-  "mid",
-  "middle",
-  "senior",
-  "lead",
-  "staff",
-  "principal",
-  "manager"
+const KEYWORD_GROUPS: Record<string, KeywordDefinition> = {
+  azure: { aliases: ["azure", "azure ad", "azure active directory", "aks", "azure devops", "azure monitor", "azure key vault"], category: "core" },
+  terraform: { aliases: ["terraform", "infrastructure as code", "iac"], category: "core" },
+  argocd: { aliases: ["argo cd", "argocd"], category: "core" },
+  gitops: { aliases: ["gitops"], category: "core" },
+  github_actions: { aliases: ["github actions"], category: "core" },
+  docker: { aliases: ["docker", "container", "containerized", "containers"], category: "core" },
+  kubernetes: { aliases: ["kubernetes", "k8s", "helm", "aks", "eks"], category: "core" },
+  grafana: { aliases: ["grafana"], category: "core" },
+  sentry: { aliases: ["sentry"], category: "supporting" },
+  webhooks: { aliases: ["webhook", "webhooks", "teams notification", "microsoft teams notification"], category: "supporting" },
+  teams: { aliases: ["microsoft teams", "teams notification", "teams webhook"], category: "supporting" },
+  unity_cloud_build: { aliases: ["unity cloud build", "cloud build for unity"], category: "supporting" },
+  ci_cd: { aliases: ["ci/cd", "ci cd", "pipeline", "pipelines", "gitlab ci", "jenkins"], category: "core" },
+  monitoring: { aliases: ["monitoring", "observability", "prometheus", "loki", "cloudwatch"], category: "supporting" },
+  troubleshooting: { aliases: ["troubleshoot", "troubleshooting", "root-cause", "incident", "support"], category: "supporting" },
+  communication: { aliases: ["communication", "collaboration", "cross-functional", "stakeholder", "english", "engleza"], category: "supporting" },
+  linux: { aliases: ["linux", "ubuntu", "debian", "centos"], category: "supporting" },
+  networking: { aliases: ["dns", "networking", "network", "haproxy", "keepalived", "nginx"], category: "supporting" },
+  aws: { aliases: ["aws", "ec2", "ecs", "eks", "cloudformation"], category: "supporting" }
+};
+
+const SENIORITY_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
+  { label: "intern", pattern: /\bintern(ship)?\b/ },
+  { label: "junior", pattern: /\bjunior\b/ },
+  { label: "mid", pattern: /\b(mid|middle|mid-level)\b/ },
+  { label: "senior", pattern: /\bsenior\b/ },
+  { label: "lead", pattern: /\b(lead|team lead|tech lead)\b/ },
+  { label: "staff", pattern: /\bstaff\b/ },
+  { label: "principal", pattern: /\bprincipal\b/ },
+  { label: "manager", pattern: /\bmanager\b/ }
+];
+
+const DOMAIN_PATTERNS = [
+  "devops",
+  "platform",
+  "cloud",
+  "infrastructure",
+  "sre",
+  "site reliability",
+  "kubernetes",
+  "ci/cd",
+  "ci cd",
+  "gitops",
+  "observability",
+  "monitoring",
+  "deployment"
 ];
 
 function normalize(input: string): string {
@@ -50,21 +67,25 @@ function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function extractMatchedKeywords(text: string): string[] {
-  const matched = Object.entries(KEYWORD_GROUPS)
-    .filter(([, aliases]) => aliases.some((alias) => text.includes(alias)))
-    .map(([keyword]) => keyword);
+function clamp(value: number, min = 0, max = 100): number {
+  return Math.max(min, Math.min(max, value));
+}
 
-  return unique(matched);
+function extractKeywordMatches(text: string): string[] {
+  return unique(
+    Object.entries(KEYWORD_GROUPS)
+      .filter(([, definition]) => definition.aliases.some((alias) => text.includes(alias)))
+      .map(([keyword]) => keyword)
+  );
 }
 
 function extractYears(text: string): number[] {
   const matches = [...text.matchAll(/(\d{1,2})\+?\s*(years|year|yrs|ani)/g)];
-  return matches.map((match) => Number(match[1])).filter((value) => Number.isFinite(value));
+  return matches.map((match) => Number(match[1])).filter(Number.isFinite);
 }
 
 function detectSeniority(text: string): string | null {
-  return SENIORITY_HINTS.find((hint) => text.includes(hint)) ?? null;
+  return SENIORITY_PATTERNS.find(({ pattern }) => pattern.test(text))?.label ?? null;
 }
 
 function average(values: number[]): number {
@@ -75,14 +96,10 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function clamp(value: number, min = 0, max = 100): number {
-  return Math.max(min, Math.min(max, value));
-}
-
 function scoreSkills(jobKeywords: string[], cvKeywords: string[]) {
   if (jobKeywords.length === 0) {
     return {
-      score: 70,
+      score: cvKeywords.length > 0 ? 55 : 40,
       matched: [],
       missing: []
     };
@@ -90,9 +107,17 @@ function scoreSkills(jobKeywords: string[], cvKeywords: string[]) {
 
   const matched = jobKeywords.filter((keyword) => cvKeywords.includes(keyword));
   const missing = jobKeywords.filter((keyword) => !cvKeywords.includes(keyword));
+  const coreKeywords = jobKeywords.filter((keyword) => KEYWORD_GROUPS[keyword]?.category === "core");
+  const supportingKeywords = jobKeywords.filter((keyword) => KEYWORD_GROUPS[keyword]?.category === "supporting");
+  const matchedCore = coreKeywords.filter((keyword) => cvKeywords.includes(keyword));
+  const matchedSupporting = supportingKeywords.filter((keyword) => cvKeywords.includes(keyword));
+  const coreRatio = coreKeywords.length > 0 ? matchedCore.length / coreKeywords.length : 0.6;
+  const supportingRatio =
+    supportingKeywords.length > 0 ? matchedSupporting.length / supportingKeywords.length : 0.6;
+  const blendedScore = coreRatio * 78 + supportingRatio * 22;
 
   return {
-    score: (matched.length / jobKeywords.length) * 100,
+    score: clamp(blendedScore),
     matched,
     missing
   };
@@ -104,30 +129,38 @@ function scoreExperience(jobText: string, cvText: string): number {
   const jobTarget = Math.max(...jobYears, 0);
   const cvLevel = Math.max(...cvYears, average(cvYears));
 
-  if (jobTarget === 0 && cvLevel === 0) {
-    return 65;
+  if (jobTarget > 0 && cvLevel > 0) {
+    return clamp((cvLevel / jobTarget) * 100);
   }
 
-  if (jobTarget === 0) {
-    return 85;
+  if (cvLevel >= 5) {
+    return 88;
   }
 
-  if (cvLevel === 0) {
-    return 35;
+  if (cvLevel >= 3) {
+    return 76;
   }
 
-  return clamp((cvLevel / jobTarget) * 100);
+  if (cvLevel > 0) {
+    return 62;
+  }
+
+  return 52;
 }
 
 function scoreSeniority(jobText: string, cvText: string): number {
   const jobSeniority = detectSeniority(jobText);
   const cvSeniority = detectSeniority(cvText);
 
-  if (!jobSeniority && !cvSeniority) {
-    return 70;
+  if (!jobSeniority && cvSeniority) {
+    return cvSeniority === "mid" || cvSeniority === "senior" ? 78 : 68;
   }
 
-  if (!jobSeniority || !cvSeniority) {
+  if (!jobSeniority && !cvSeniority) {
+    return 65;
+  }
+
+  if (!cvSeniority) {
     return 55;
   }
 
@@ -135,33 +168,38 @@ function scoreSeniority(jobText: string, cvText: string): number {
     return 100;
   }
 
-  const order = ["intern", "junior", "mid", "middle", "senior", "lead", "staff", "principal", "manager"];
+  const order = ["intern", "junior", "mid", "senior", "lead", "staff", "principal", "manager"];
   const distance = Math.abs(order.indexOf(jobSeniority) - order.indexOf(cvSeniority));
   return clamp(100 - distance * 18);
 }
 
 function scoreDomain(jobText: string, cvText: string): number {
-  const signals = ["saas", "ecommerce", "fintech", "healthcare", "b2b", "b2c", "marketplace", "startup"];
-  const jobSignals = signals.filter((signal) => jobText.includes(signal));
-  const cvSignals = signals.filter((signal) => cvText.includes(signal));
+  const jobSignals = DOMAIN_PATTERNS.filter((signal) => jobText.includes(signal));
+  const cvSignals = DOMAIN_PATTERNS.filter((signal) => cvText.includes(signal));
 
   if (jobSignals.length === 0) {
     return 70;
   }
 
   const matched = jobSignals.filter((signal) => cvSignals.includes(signal));
-  return clamp((matched.length / jobSignals.length) * 100);
+  if (matched.length === 0) {
+    return 35;
+  }
+
+  return clamp(40 + (matched.length / jobSignals.length) * 60);
 }
 
 function scoreCommunication(jobText: string, cvText: string): number {
-  const jobNeedsCommunication = /(communication|stakeholder|collaboration|cross-functional|english|engleza)/.test(jobText);
-  const cvHasCommunication = /(communication|stakeholder|collaboration|cross-functional|english|engleza)/.test(cvText);
+  const jobNeedsCommunication =
+    /(communication|collaboration|cross-functional|stakeholder|teams|support|troubleshoot|webhook)/.test(jobText);
+  const cvHasCommunication =
+    /(communication|collaboration|cross-functional|stakeholder|teams|support|troubleshoot|root-cause|english|engleza)/.test(cvText);
 
   if (!jobNeedsCommunication) {
-    return 75;
+    return 65;
   }
 
-  return cvHasCommunication ? 90 : 45;
+  return cvHasCommunication ? 82 : 52;
 }
 
 function verdictFromScore(score: number): MatchResponse["verdict"] {
@@ -176,26 +214,27 @@ function verdictFromScore(score: number): MatchResponse["verdict"] {
   return "weak-fit";
 }
 
-function summaryFromScore(score: number, missingKeywords: string[]): string {
+function summaryFromResult(score: number, matched: string[], missing: string[]): string {
+  const matchedCount = matched.length;
+  const missingCount = missing.length;
+
   if (score >= 75) {
-    return missingKeywords.length > 0
-      ? "Profilul se potriveste bine, dar exista cateva lipsuri punctuale fata de cerintele rolului."
-      : "Profilul se aliniaza foarte bine cu cerintele rolului.";
+    return `CV-ul acopera bine cerintele rolului: ${matchedCount} cerinte tehnice cheie sunt sustinute clar, iar gap-urile ramase sunt mai degraba punctuale${missingCount > 0 ? ` (${missing.slice(0, 3).join(", ")})` : ""}.`;
   }
 
   if (score >= 50) {
-    return "Exista o baza relevanta pentru rol, dar sunt cateva gap-uri care pot reduce sansele la screening.";
+    return `Exista overlap tehnic real intre CV si JD: ${matchedCount} cerinte cheie sunt acoperite, dar lipsesc sau nu sunt explicite cateva elemente importante${missingCount > 0 ? ` precum ${missing.slice(0, 3).join(", ")}` : ""}.`;
   }
 
-  return "Potrivirea este limitata in acest moment, mai ales pe cerintele esentiale sau senioritate.";
+  return `Potrivirea este limitata: doar ${matchedCount} cerinte cheie apar suficient de clar in CV, iar diferentele principale sunt${missingCount > 0 ? ` ${missing.slice(0, 4).join(", ")}` : " multiple cerinte esentiale"}.`;
 }
 
 export function evaluateMatch(jobDescription: string, cv: string): MatchResponse {
   const normalizedJob = normalize(jobDescription);
   const normalizedCv = normalize(cv);
 
-  const jobKeywords = extractMatchedKeywords(normalizedJob);
-  const cvKeywords = extractMatchedKeywords(normalizedCv);
+  const jobKeywords = extractKeywordMatches(normalizedJob);
+  const cvKeywords = extractKeywordMatches(normalizedCv);
   const skillResult = scoreSkills(jobKeywords, cvKeywords);
 
   const breakdown: ScoreBreakdown = {
@@ -206,41 +245,73 @@ export function evaluateMatch(jobDescription: string, cv: string): MatchResponse
     communication: Math.round(scoreCommunication(normalizedJob, normalizedCv))
   };
 
-  const weightedScore =
-    breakdown.skills * 0.42 +
-    breakdown.experience * 0.2 +
-    breakdown.seniority * 0.16 +
-    breakdown.domain * 0.12 +
-    breakdown.communication * 0.1;
+  let matchScore = Math.round(
+    clamp(
+      breakdown.skills * 0.5 +
+        breakdown.experience * 0.18 +
+        breakdown.seniority * 0.1 +
+        breakdown.domain * 0.12 +
+        breakdown.communication * 0.1
+    )
+  );
 
-  const matchScore = Math.round(clamp(weightedScore));
+  if (skillResult.matched.length >= 5) {
+    matchScore = Math.max(matchScore, 60);
+  }
+
+  if (skillResult.matched.length >= 7) {
+    matchScore = Math.max(matchScore, 70);
+  }
+
   const verdict = verdictFromScore(matchScore);
 
   const strengths = [
-    skillResult.matched.length > 0 ? `Ai acoperire pe ${skillResult.matched.slice(0, 5).join(", ")}.` : null,
-    breakdown.experience >= 75 ? "Experienta declarata pare aliniata cu nivelul cerut." : null,
-    breakdown.seniority >= 80 ? "Seniority-ul sugerat de CV este apropiat de nivelul rolului." : null,
-    breakdown.communication >= 80 ? "CV-ul contine semnale bune de colaborare, stakeholder management sau engleza." : null
+    skillResult.matched.length > 0
+      ? `CV-ul sustine explicit ${skillResult.matched.slice(0, 6).join(", ")}.`
+      : null,
+    breakdown.experience >= 75
+      ? "Experienta declarata este suficient de solida pentru un rol DevOps orientat pe infrastructura si livrare."
+      : null,
+    breakdown.domain >= 75
+      ? "Profilul ramane in aceeasi zona tehnica: cloud, infrastructura, deployment si observability."
+      : null,
+    breakdown.communication >= 80
+      ? "Apar semnale bune de troubleshooting, support si colaborare cu alte echipe."
+      : null
   ].filter((value): value is string => Boolean(value));
 
   const risks = [
-    skillResult.missing.length > 0 ? `Lipsesc semnale clare pentru ${skillResult.missing.slice(0, 6).join(", ")}.` : null,
-    breakdown.experience < 60 ? "Experienta mentionata pare sub nivelul cerut in JD." : null,
-    breakdown.seniority < 60 ? "Seniority-ul pare posibil sub sau peste nivelul cautat." : null,
-    breakdown.domain < 55 ? "Nu apar suficiente indicii ca ai experienta in acelasi tip de produs sau industrie." : null
+    skillResult.missing.length > 0
+      ? `Nu apar dovezi suficient de clare pentru ${skillResult.missing.slice(0, 5).join(", ")}.`
+      : null,
+    !cvKeywords.includes("sentry")
+      ? "CV-ul nu mentioneaza Sentry, desi apare in cerinte."
+      : null,
+    !cvKeywords.includes("unity_cloud_build")
+      ? "Nu exista experienta explicita cu Unity Cloud Build."
+      : null,
+    !cvKeywords.includes("webhooks")
+      ? "Webhook-urile sau integrari similare nu sunt descrise explicit."
+      : null
   ].filter((value): value is string => Boolean(value));
 
   const recommendations = [
-    skillResult.missing.length > 0 ? `Evidentiaza explicit in CV experienta cu ${skillResult.missing.slice(0, 4).join(", ")} daca exista.` : null,
-    breakdown.experience < 70 ? "Fa mai vizibili anii de experienta si impactul pe fiecare rol." : null,
-    breakdown.communication < 70 ? "Adauga exemple de colaborare cross-functional, prezentari sau stakeholder management." : null,
-    "Adapteaza sumarul CV-ului pe limbajul si tehnologiile din JD inainte de aplicare."
+    skillResult.missing.length > 0
+      ? `Daca ai facut asta in practica, scoate mai clar in CV experienta cu ${skillResult.missing.slice(0, 4).join(", ")}.`
+      : null,
+    !cvKeywords.includes("github_actions")
+      ? "Pune un exemplu concret de pipeline in GitHub Actions, daca ai folosit deja acest tool."
+      : null,
+    !cvKeywords.includes("teams")
+      ? "Daca ai configurat notificari sau integrari in Microsoft Teams, merita mentionate explicit."
+      : null,
+    "Leaga fiecare rol de impact operational: uptime, timp de deploy, automatizare, incidente rezolvate."
   ].filter((value): value is string => Boolean(value));
 
   return {
     matchScore,
     verdict,
-    summary: summaryFromScore(matchScore, skillResult.missing),
+    summary: summaryFromResult(matchScore, skillResult.matched, skillResult.missing),
     matchedKeywords: skillResult.matched,
     missingKeywords: skillResult.missing,
     strengths,
@@ -249,4 +320,3 @@ export function evaluateMatch(jobDescription: string, cv: string): MatchResponse
     breakdown
   };
 }
-

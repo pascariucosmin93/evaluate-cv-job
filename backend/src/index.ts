@@ -4,7 +4,7 @@ import helmet from "helmet";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import { z } from "zod";
-import { evaluateMatchWithOllama } from "./lib/ollama.js";
+import { evaluateMatchWithOllama, tailorCvWithOllama } from "./lib/ollama.js";
 
 const app = express();
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
@@ -60,6 +60,38 @@ app.post("/api/v1/evaluate", async (req, res) => {
         error instanceof Error
           ? error.message
           : "AI evaluation is currently unavailable."
+    });
+  }
+});
+
+app.post("/api/v1/tailor-cv", async (req, res) => {
+  const parsed = requestSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      message: "Invalid request payload.",
+      issues: parsed.error.issues
+    });
+    return;
+  }
+
+  try {
+    const result = await tailorCvWithOllama(parsed.data.jobDescription, parsed.data.cv);
+
+    res.status(200).json({
+      jobTitle: parsed.data.jobTitle ?? null,
+      ...result
+    });
+  } catch (error) {
+    req.log.warn(
+      { error },
+      "Ollama CV tailoring failed"
+    );
+    res.status(503).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "AI CV tailoring is currently unavailable."
     });
   }
 });
