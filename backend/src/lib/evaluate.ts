@@ -54,6 +54,26 @@ const DOMAIN_PATTERNS = [
   "deployment"
 ];
 
+const GENERIC_IT_PATTERNS = [
+  "software",
+  "engineer",
+  "developer",
+  "backend",
+  "frontend",
+  "fullstack",
+  "full-stack",
+  "cloud",
+  "infra",
+  "infrastructure",
+  "system administrator",
+  "sysadmin",
+  "administrator",
+  "security",
+  "database",
+  "network engineer",
+  "site reliability"
+];
+
 function normalize(input: string): string {
   return input
     .toLowerCase()
@@ -86,6 +106,14 @@ function extractYears(text: string): number[] {
 
 function detectSeniority(text: string): string | null {
   return SENIORITY_PATTERNS.find(({ pattern }) => pattern.test(text))?.label ?? null;
+}
+
+function looksTechnical(text: string): boolean {
+  return (
+    extractKeywordMatches(text).length > 0 ||
+    DOMAIN_PATTERNS.some((signal) => text.includes(signal)) ||
+    GENERIC_IT_PATTERNS.some((signal) => text.includes(signal))
+  );
 }
 
 function average(values: number[]): number {
@@ -218,9 +246,18 @@ function verdictFromScore(score: number): MatchResponse["verdict"] {
   return "weak-fit";
 }
 
-function summaryFromResult(score: number, matched: string[], missing: string[]): string {
+function summaryFromResult(
+  score: number,
+  matched: string[],
+  missing: string[],
+  clearlyDifferentDomains: boolean
+): string {
   const matchedCount = matched.length;
   const missingCount = missing.length;
+
+  if (clearlyDifferentDomains) {
+    return "Job description-ul apartine unui domeniu complet diferit fata de profilul tehnic din CV, deci potrivirea reala este foarte mica.";
+  }
 
   if (score >= 75) {
     return `CV-ul acopera bine cerintele rolului: ${matchedCount} cerinte tehnice cheie sunt sustinute clar, iar gap-urile ramase sunt mai degraba punctuale${missingCount > 0 ? ` (${missing.slice(0, 3).join(", ")})` : ""}.`;
@@ -240,6 +277,9 @@ export function evaluateMatch(jobDescription: string, cv: string): MatchResponse
   const jobKeywords = extractKeywordMatches(normalizedJob);
   const cvKeywords = extractKeywordMatches(normalizedCv);
   const skillResult = scoreSkills(jobKeywords, cvKeywords);
+  const jobLooksTechnical = looksTechnical(normalizedJob);
+  const cvLooksTechnical = looksTechnical(normalizedCv);
+  const clearlyDifferentDomains = !jobLooksTechnical && cvLooksTechnical;
 
   const breakdown: ScoreBreakdown = {
     skills: Math.round(skillResult.score),
@@ -256,8 +296,17 @@ export function evaluateMatch(jobDescription: string, cv: string): MatchResponse
         breakdown.seniority * 0.1 +
         breakdown.domain * 0.12 +
         breakdown.communication * 0.1
-    )
+      )
   );
+
+  if (clearlyDifferentDomains) {
+    breakdown.skills = Math.min(breakdown.skills, 5);
+    breakdown.experience = Math.min(breakdown.experience, 15);
+    breakdown.seniority = Math.min(breakdown.seniority, 20);
+    breakdown.domain = Math.min(breakdown.domain, 5);
+    breakdown.communication = Math.min(breakdown.communication, 30);
+    matchScore = Math.min(matchScore, 12);
+  }
 
   if (skillResult.matched.length >= 5) {
     matchScore = Math.max(matchScore, 60);
@@ -267,55 +316,85 @@ export function evaluateMatch(jobDescription: string, cv: string): MatchResponse
     matchScore = Math.max(matchScore, 70);
   }
 
+  if (clearlyDifferentDomains) {
+    matchScore = Math.min(matchScore, 12);
+  }
+
   const verdict = verdictFromScore(matchScore);
 
   const strengths = [
-    skillResult.matched.length > 0
-      ? `CV-ul sustine explicit ${skillResult.matched.slice(0, 6).join(", ")}.`
-      : null,
-    breakdown.experience >= 75
-      ? "Experienta declarata este suficient de solida pentru un rol DevOps orientat pe infrastructura si livrare."
-      : null,
-    breakdown.domain >= 75
-      ? "Profilul ramane in aceeasi zona tehnica: cloud, infrastructura, deployment si observability."
-      : null,
-    breakdown.communication >= 80
-      ? "Apar semnale bune de troubleshooting, support si colaborare cu alte echipe."
-      : null
+    clearlyDifferentDomains
+      ? null
+      : skillResult.matched.length > 0
+        ? `CV-ul sustine explicit ${skillResult.matched.slice(0, 6).join(", ")}.`
+        : null,
+    clearlyDifferentDomains
+      ? null
+      : breakdown.experience >= 75
+        ? "Experienta declarata este suficient de solida pentru un rol DevOps orientat pe infrastructura si livrare."
+        : null,
+    clearlyDifferentDomains
+      ? null
+      : breakdown.domain >= 75
+        ? "Profilul ramane in aceeasi zona tehnica: cloud, infrastructura, deployment si observability."
+        : null,
+    clearlyDifferentDomains
+      ? null
+      : breakdown.communication >= 80
+        ? "Apar semnale bune de troubleshooting, support si colaborare cu alte echipe."
+        : null
   ].filter((value): value is string => Boolean(value));
 
   const risks = [
-    skillResult.missing.length > 0
+    clearlyDifferentDomains
+      ? "Job description-ul descrie un rol din alt domeniu decat profilul tehnic din CV."
+      : null,
+    !clearlyDifferentDomains && skillResult.missing.length > 0
       ? `Nu apar dovezi suficient de clare pentru ${skillResult.missing.slice(0, 5).join(", ")}.`
       : null,
-    !cvKeywords.includes("sentry")
+    jobKeywords.includes("sentry") && !cvKeywords.includes("sentry")
       ? "CV-ul nu mentioneaza Sentry, desi apare in cerinte."
       : null,
-    !cvKeywords.includes("unity_cloud_build")
+    jobKeywords.includes("unity_cloud_build") && !cvKeywords.includes("unity_cloud_build")
       ? "Nu exista experienta explicita cu Unity Cloud Build."
-      : null,
-    !cvKeywords.includes("webhooks")
-      ? "Webhook-urile sau integrari similare nu sunt descrise explicit."
       : null
   ].filter((value): value is string => Boolean(value));
 
   const recommendations = [
-    skillResult.missing.length > 0
+    clearlyDifferentDomains
+      ? "Pentru acest JD ai nevoie de un CV din acelasi domeniu; profilul DevOps actual nu trebuie fortat pe un rol sportiv."
+      : null,
+    !clearlyDifferentDomains && skillResult.missing.length > 0
       ? `Daca ai facut asta in practica, scoate mai clar in CV experienta cu ${skillResult.missing.slice(0, 4).join(", ")}.`
       : null,
-    !cvKeywords.includes("github_actions")
+    jobKeywords.includes("github_actions") && !cvKeywords.includes("github_actions")
       ? "Pune un exemplu concret de pipeline in GitHub Actions, daca ai folosit deja acest tool."
       : null,
-    !cvKeywords.includes("teams")
+    jobKeywords.includes("teams") && !cvKeywords.includes("teams")
       ? "Daca ai configurat notificari sau integrari in Microsoft Teams, merita mentionate explicit."
       : null,
-    "Leaga fiecare rol de impact operational: uptime, timp de deploy, automatizare, incidente rezolvate."
+    !clearlyDifferentDomains
+      ? "Leaga fiecare rol de impact operational: uptime, timp de deploy, automatizare, incidente rezolvate."
+      : null
   ].filter((value): value is string => Boolean(value));
+
+  if (strengths.length === 0) {
+    strengths.push(
+      clearlyDifferentDomains
+        ? "Nu exista puncte forte relevante deoarece JD-ul nu apartine aceluiasi domeniu profesional."
+        : "Nu exista suficiente suprapuneri clare pentru a evidentia puncte forte solide."
+    );
+  }
 
   return {
     matchScore,
     verdict,
-    summary: summaryFromResult(matchScore, skillResult.matched, skillResult.missing),
+    summary: summaryFromResult(
+      matchScore,
+      skillResult.matched,
+      skillResult.missing,
+      clearlyDifferentDomains
+    ),
     matchedKeywords: skillResult.matched,
     missingKeywords: skillResult.missing,
     strengths,
