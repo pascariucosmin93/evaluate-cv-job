@@ -26,12 +26,10 @@ type EvaluationResponse = {
 
 async function extractTextFromPdf(file: File) {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc = "/api/pdf-worker";
 
   const data = new Uint8Array(await file.arrayBuffer());
-  const document = await pdfjs.getDocument({
-    data,
-    disableWorker: true,
-  } as Parameters<typeof pdfjs.getDocument>[0]).promise;
+  const document = await pdfjs.getDocument(data).promise;
   const pages = await Promise.all(
     Array.from({ length: document.numPages }, async (_, index) => {
       const page = await document.getPage(index + 1);
