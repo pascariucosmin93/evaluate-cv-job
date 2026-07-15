@@ -5,6 +5,7 @@ import pino from "pino";
 import pinoHttp from "pino-http";
 import { z } from "zod";
 import { evaluateMatch } from "./lib/evaluate.js";
+import { evaluateMatchWithOllama } from "./lib/ollama.js";
 
 const app = express();
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
@@ -32,7 +33,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.post("/api/v1/evaluate", (req, res) => {
+app.post("/api/v1/evaluate", async (req, res) => {
   const parsed = requestSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -43,12 +44,26 @@ app.post("/api/v1/evaluate", (req, res) => {
     return;
   }
 
-  const result = evaluateMatch(parsed.data.jobDescription, parsed.data.cv);
+  try {
+    const result = await evaluateMatchWithOllama(parsed.data.jobDescription, parsed.data.cv);
 
-  res.status(200).json({
-    jobTitle: parsed.data.jobTitle ?? null,
-    ...result
-  });
+    res.status(200).json({
+      jobTitle: parsed.data.jobTitle ?? null,
+      ...result
+    });
+  } catch (error) {
+    req.log.warn(
+      { error },
+      "Ollama evaluation failed, falling back to heuristic scoring"
+    );
+
+    const result = evaluateMatch(parsed.data.jobDescription, parsed.data.cv);
+
+    res.status(200).json({
+      jobTitle: parsed.data.jobTitle ?? null,
+      ...result
+    });
+  }
 });
 
 app.use((_req, res) => {
