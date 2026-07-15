@@ -24,4 +24,6 @@ export type TailoredCvResponse = {
   notes: string[];
   addedSkills: string[];
   rejectedSkills: string[];
+  blocked: boolean;
+  blockReason: string | null;
 };

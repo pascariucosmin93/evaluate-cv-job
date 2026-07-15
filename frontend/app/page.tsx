@@ -31,6 +31,8 @@ type TailoredCvResponse = {
   notes: string[];
   addedSkills: string[];
   rejectedSkills: string[];
+  blocked: boolean;
+  blockReason: string | null;
 };
 
 const BREAKDOWN_LABELS: Record<keyof Breakdown, string> = {
@@ -77,8 +79,31 @@ function escapePdfText(value: string) {
     .replace(/\)/g, "\\)");
 }
 
+function sanitizePdfText(value: string) {
+  return value
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2022/g, "*")
+    .replace(/\u00A0/g, " ")
+    .replace(/ă/g, "a")
+    .replace(/â/g, "a")
+    .replace(/î/g, "i")
+    .replace(/ș/g, "s")
+    .replace(/ş/g, "s")
+    .replace(/ț/g, "t")
+    .replace(/ţ/g, "t")
+    .replace(/Ă/g, "A")
+    .replace(/Â/g, "A")
+    .replace(/Î/g, "I")
+    .replace(/Ș/g, "S")
+    .replace(/Ş/g, "S")
+    .replace(/Ț/g, "T")
+    .replace(/Ţ/g, "T");
+}
+
 function wrapTextForPdf(text: string, maxLineLength = 92) {
-  const sourceLines = text.replace(/\r/g, "").split("\n");
+  const sourceLines = sanitizePdfText(text).replace(/\r/g, "").split("\n");
   const wrappedLines: string[] = [];
 
   for (const sourceLine of sourceLines) {
@@ -353,7 +378,7 @@ export default function Home() {
   }
 
   function handleDownloadTailoredCv() {
-    if (!tailoredCvResult) {
+    if (!tailoredCvResult || tailoredCvResult.blocked) {
       return;
     }
 
@@ -576,18 +601,21 @@ export default function Home() {
                   <div>
                     <h3>CV adaptat de AI</h3>
                     <p className={styles.tailorIntro}>
-                      AI-ul a pastrat structura CV-ului si a incercat sa schimbe
-                      doar wording-ul relevant pentru acest JD.
+                      {tailoredCvResult.blocked
+                        ? tailoredCvResult.blockReason || "Generarea CV-ului adaptat a fost oprita."
+                        : "AI-ul a pastrat structura CV-ului si a incercat sa schimbe doar wording-ul relevant pentru acest JD."}
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    className={styles.downloadButton}
-                    onClick={handleDownloadTailoredCv}
-                  >
-                    Download CV AI
-                  </button>
+                  {!tailoredCvResult.blocked ? (
+                    <button
+                      type="button"
+                      className={styles.downloadButton}
+                      onClick={handleDownloadTailoredCv}
+                    >
+                      Download CV AI
+                    </button>
+                  ) : null}
                 </div>
 
                 <div className={styles.columns}>
@@ -634,27 +662,29 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className={styles.tailorGrid}>
-                  <div>
-                    <p className={styles.mutedLabel}>CV original</p>
-                    <textarea
-                      readOnly
-                      value={cv}
-                      rows={16}
-                      className={styles.tailorArea}
-                    />
-                  </div>
+                {!tailoredCvResult.blocked ? (
+                  <div className={styles.tailorGrid}>
+                    <div>
+                      <p className={styles.mutedLabel}>CV original</p>
+                      <textarea
+                        readOnly
+                        value={cv}
+                        rows={16}
+                        className={styles.tailorArea}
+                      />
+                    </div>
 
-                  <div>
-                    <p className={styles.mutedLabel}>CV propus de AI</p>
-                    <textarea
-                      readOnly
-                      value={tailoredCvResult.tailoredCv}
-                      rows={16}
-                      className={styles.tailorArea}
-                    />
+                    <div>
+                      <p className={styles.mutedLabel}>CV propus de AI</p>
+                      <textarea
+                        readOnly
+                        value={tailoredCvResult.tailoredCv}
+                        rows={16}
+                        className={styles.tailorArea}
+                      />
+                    </div>
                   </div>
-                </div>
+                ) : null}
               </div>
             ) : null}
           </section>

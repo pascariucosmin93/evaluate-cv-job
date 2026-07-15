@@ -124,6 +124,27 @@ function extractKeywordMatches(text: string): string[] {
     .map(([keyword]) => keyword);
 }
 
+function compressCvForTailoring(cv: string, relevantKeywords: string[]) {
+  const normalizedKeywords = relevantKeywords.map((keyword) => keyword.toLowerCase());
+  const rawSegments = cv
+    .replace(/\r/g, "")
+    .split(/\n{2,}|\s{2,}/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const prioritizedSegments = rawSegments.filter((segment) => {
+    const normalizedSegment = segment.toLowerCase();
+    return normalizedKeywords.some((keyword) => normalizedSegment.includes(keyword));
+  });
+
+  const orderedSegments = [
+    ...prioritizedSegments,
+    ...rawSegments.filter((segment) => !prioritizedSegments.includes(segment))
+  ];
+
+  return orderedSegments.join("\n").slice(0, 3200);
+}
+
 function buildPrompt(jobDescription: string, cv: string) {
   const deterministicResult = evaluateMatch(jobDescription, cv);
   const jdKeywords = extractKeywordMatches(jobDescription);
@@ -171,40 +192,33 @@ function buildPrompt(jobDescription: string, cv: string) {
 function buildTailorCvPrompt(jobDescription: string, cv: string) {
   const deterministicResult = evaluateMatch(jobDescription, cv);
   const missingKeywords = deterministicResult.missingKeywords;
+  const promptCv = compressCvForTailoring(
+    cv,
+    [...deterministicResult.matchedKeywords, ...missingKeywords]
+  );
 
   return [
-    "Rescrii un CV pentru a se alinia mai bine cu un job description.",
+    "Adaptezi un CV pentru un job description.",
     "Raspunzi doar in limba romana.",
     "Returneaza doar JSON valid.",
-    "Nu include markdown fences sau explicatii in afara JSON-ului.",
-    "Scopul nu este sa rescrii complet CV-ul, ci sa faci modificari minime si precise.",
-    "Vrei in mod explicit sa adaugi in CV skill-urile lipsa din JD, dar numai daca sunt sustinute rezonabil de dovezi sau context foarte apropiat din CV.",
+    "Nu include explicatii in afara JSON-ului.",
+    "Fa modificari minime.",
+    "Adauga skill-urile lipsa doar daca sunt sustinute de CV.",
     "Nu inventa experienta, proiecte, certificari, ani, tool-uri sau responsabilitati care nu apar in CV.",
-    "Pastreaza informatia factuala din CV si structura generala a sectiunilor cat mai aproape de original.",
-    "Ai voie sa reformulezi pentru claritate, sa muti accentul pe tehnologiile relevante si sa faci wording-ul mai apropiat de JD.",
-    "Daca o cerinta din JD este sustinuta de CV, dar nu este mentionata explicit, adaug-o explicit in tailoredCv.",
-    "Daca o cerinta din JD nu este sustinuta de CV, nu o adauga ca experienta reala.",
-    "Foloseste exact aceasta schema:",
+    "Pastreaza structura generala si informatia factuala.",
+    "Daca o cerinta nu este sustinuta, pune-o in rejectedSkills.",
+    "Schema exacta:",
     '{"tailoredCv":"string","changesSummary":["string"],"notes":["string"],"addedSkills":["string"],"rejectedSkills":["string"]}',
-    "Reguli pentru tailoredCv:",
-    "- pastreaza numele, contactul, companiile, perioadele si rolurile din CV",
-    "- nu sterge sectiuni importante",
-    "- schimba doar ce ajuta direct la relevanta pentru JD",
-    "- optimizeaza summary-ul, bullet-urile si skills section",
-    "- mentine CV-ul plauzibil si onest",
-    "- addedSkills trebuie sa contina skill-urile pe care le-ai introdus sau le-ai facut explicite in CV-ul nou",
-    "- rejectedSkills trebuie sa contina skill-urile din JD pe care nu le-ai putut adauga onest",
-    "- pentru fiecare skill lipsa, ia o decizie explicita: adaugat sau respins",
     "",
-    `Scor curent estimat: ${deterministicResult.matchScore}%`,
-    `Cerinte potrivite deja: ${deterministicResult.matchedKeywords.join(", ") || "niciuna"}`,
-    `Cerinte lipsa sau neexplicite: ${missingKeywords.join(", ") || "niciuna"}`,
+    `Match curent: ${deterministicResult.matchScore}%`,
+    `Cerinte deja sustinute: ${deterministicResult.matchedKeywords.join(", ") || "niciuna"}`,
+    `Cerinte lipsa: ${missingKeywords.join(", ") || "niciuna"}`,
     "",
     "JOB DESCRIPTION:",
-    jobDescription,
+    jobDescription.slice(0, 1800),
     "",
     "CV ORIGINAL:",
-    cv
+    promptCv
   ].join("\n");
 }
 
@@ -263,6 +277,30 @@ export async function tailorCvWithOllama(jobDescription: string, cv: string): Pr
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://ollama:11434";
   const model = process.env.OLLAMA_MODEL || "llama3.1:8b";
   const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || 45000);
+  const deterministicResult = evaluateMatch(jobDescription, cv);
+  const rejectedKeywords = deterministicResult.missingKeywords.length > 0
+    ? deterministicResult.missingKeywords
+    : extractKeywordMatches(jobDescription);
+
+  if (
+    deterministicResult.matchScore <= 20 &&
+    deterministicResult.matchedKeywords.length === 0
+  ) {
+    return {
+      tailoredCv: cv,
+      changesSummary: [
+        "Generarea unui CV adaptat a fost oprita pentru ca JD-ul nu este compatibil cu profilul actual."
+      ],
+      notes: [
+        deterministicResult.summary,
+        "Nu este corect sa rescriem un CV DevOps ca sa para relevant pentru un rol din alt domeniu."
+      ],
+      addedSkills: [],
+      rejectedSkills: rejectedKeywords,
+      blocked: true,
+      blockReason: "JD-ul este din alt domeniu, deci aplicatia nu genereaza un CV adaptat artificial."
+    };
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -277,7 +315,11 @@ export async function tailorCvWithOllama(jobDescription: string, cv: string): Pr
         model,
         prompt: buildTailorCvPrompt(jobDescription, cv),
         stream: false,
-        format: "json"
+        format: "json",
+        options: {
+          num_predict: 900,
+          temperature: 0.2
+        }
       }),
       signal: controller.signal
     });
@@ -306,7 +348,9 @@ export async function tailorCvWithOllama(jobDescription: string, cv: string): Pr
       rejectedSkills: ensureItems(
         parsed.rejectedSkills,
         "AI-ul nu a marcat skill-uri respinse explicit."
-      )
+      ),
+      blocked: false,
+      blockReason: null
     };
   } catch (error) {
     if (error instanceof Error) {

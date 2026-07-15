@@ -1,0 +1,63 @@
+name: promote-production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_latest:
+        description: "Type latest to confirm production promotion"
+        required: true
+        default: "latest"
+
+env:
+  DEPLOY_PATH: ${{ secrets.PROD_DEPLOY_PATH }}
+
+jobs:
+  promote:
+    if: github.event.inputs.confirm_latest == 'latest'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy production compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT || '22' }}
+          source: "deploy/docker-compose.production.yml"
+          target: ${{ env.DEPLOY_PATH }}
+          strip_components: 1
+
+      - name: Promote latest images in production
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          PROD_GHCR_USERNAME: ${{ secrets.PROD_GHCR_USERNAME }}
+          PROD_GHCR_TOKEN: ${{ secrets.PROD_GHCR_TOKEN }}
+          PROD_OLLAMA_MODEL: ${{ secrets.PROD_OLLAMA_MODEL }}
+          PROD_OLLAMA_TIMEOUT_MS: ${{ secrets.PROD_OLLAMA_TIMEOUT_MS }}
+          PROD_FRONTEND_PORT: ${{ secrets.PROD_FRONTEND_PORT }}
+          PROD_BACKEND_PORT: ${{ secrets.PROD_BACKEND_PORT }}
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT || '22' }}
+          envs: PROD_GHCR_USERNAME,PROD_GHCR_TOKEN,PROD_OLLAMA_MODEL,PROD_OLLAMA_TIMEOUT_MS,PROD_FRONTEND_PORT,PROD_BACKEND_PORT
+          script: |
+            set -euo pipefail
+            mkdir -p "${{ env.DEPLOY_PATH }}"
+            cd "${{ env.DEPLOY_PATH }}"
+            echo "$PROD_GHCR_TOKEN" | docker login ghcr.io -u "$PROD_GHCR_USERNAME" --password-stdin
+            export OLLAMA_MODEL="${PROD_OLLAMA_MODEL:-qwen2.5:3b}"
+            export OLLAMA_TIMEOUT_MS="${PROD_OLLAMA_TIMEOUT_MS:-180000}"
+            export FRONTEND_PORT="${PROD_FRONTEND_PORT:-2026}"
+            export BACKEND_PORT="${PROD_BACKEND_PORT:-8080}"
+            docker compose -f docker-compose.production.yml pull
+            docker compose -f docker-compose.production.yml up -d
+            docker image prune -f
