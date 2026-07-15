@@ -52,6 +52,7 @@ export default function Home() {
   const [jobDescription, setJobDescription] = useState("");
   const [cv, setCv] = useState("");
   const [cvFileName, setCvFileName] = useState("");
+  const [hasUploadedCv, setHasUploadedCv] = useState(false);
   const [result, setResult] = useState<EvaluationResponse | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -68,6 +69,7 @@ export default function Home() {
     setError("");
     setCv("");
     setCvFileName("");
+    setHasUploadedCv(false);
 
     if (!file) {
       return;
@@ -98,17 +100,18 @@ export default function Home() {
 
       if (text.trim().length < 50) {
         throw new Error(
-          "Fisierul incarcat nu contine suficient text pentru evaluare."
+          "PDF-ul a fost incarcat, dar nu am putut extrage suficient text din el pentru evaluare."
         );
       }
 
       setCv(text);
       setCvFileName(file.name);
+      setHasUploadedCv(true);
     } catch (fileError) {
       setError(
         fileError instanceof Error
           ? fileError.message
-          : "Nu am putut citi fisierul incarcat."
+          : "Nu am putut citi PDF-ul incarcat."
       );
       event.target.value = "";
     } finally {
@@ -121,9 +124,9 @@ export default function Home() {
     setIsLoading(true);
     setError("");
 
-    if (!cv) {
+    if (!hasUploadedCv || !cv) {
       setIsLoading(false);
-      setError("Incarca mai intai CV-ul in format text.");
+      setError("Incarca un CV PDF valid inainte sa calculezi potrivirea.");
       return;
     }
 
@@ -172,9 +175,8 @@ export default function Home() {
           <p className={styles.eyebrow}>CV x Job Description</p>
           <h1>Afla rapid daca merita sa aplici.</h1>
           <p className={styles.subtitle}>
-            Incarci CV-ul si adaugi JD-ul, iar aplicatia iti da un scor de
-            potrivire, gap-urile principale si ce sa corectezi inainte de
-            aplicare.
+            Incarci CV-ul ca PDF, adaugi job description-ul ca text, iar
+            aplicatia extrage continutul CV-ului si calculeaza potrivirea.
           </p>
         </section>
 
@@ -207,14 +209,14 @@ export default function Home() {
               <input
                 id="cvFile"
                 type="file"
-                accept=".pdf,.txt,.md,.rtf,application/pdf,text/plain,text/markdown,application/rtf"
+                accept=".pdf,application/pdf"
                 onChange={handleCvFileChange}
               />
               <p className={styles.fieldHint}>
-                Incarca un CV `.pdf`, `.txt`, `.md` sau `.rtf`.
+                Incarca CV-ul ca fisier `.pdf`. Textul este extras automat pentru analiza.
               </p>
               {isReadingFile ? (
-                <p className={styles.fileStatus}>Citesc fisierul incarcat...</p>
+                <p className={styles.fileStatus}>Extrag textul din PDF...</p>
               ) : null}
               {cvFileName ? (
                 <div className={styles.uploadSummary}>
