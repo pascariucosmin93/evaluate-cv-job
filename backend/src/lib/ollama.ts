@@ -1,6 +1,29 @@
 import { z } from "zod";
 import { MatchResponse } from "../types.js";
 
+const KEYWORD_GROUPS: Record<string, string[]> = {
+  aws: ["aws", "ec2", "ecs", "eks", "cloudformation"],
+  azure: ["azure", "aks", "azure devops", "azure monitor", "azure key vault"],
+  terraform: ["terraform"],
+  kubernetes: ["kubernetes", "k8s", "eks", "aks"],
+  docker: ["docker", "containers"],
+  ansible: ["ansible"],
+  gitlab_ci: ["gitlab ci", "gitlab"],
+  github_actions: ["github actions"],
+  jenkins: ["jenkins"],
+  grafana: ["grafana"],
+  prometheus: ["prometheus"],
+  loki: ["loki"],
+  vault: ["vault", "hashicorp vault"],
+  linux: ["linux", "ubuntu", "debian", "centos"],
+  argocd: ["argo cd", "argocd"],
+  helm: ["helm"],
+  bash: ["bash"],
+  powershell: ["powershell"],
+  networking: ["dns", "nginx", "haproxy", "keepalived", "networking"],
+  observability: ["observability", "monitoring", "cloudwatch"]
+};
+
 const ollamaResponseSchema = z.object({
   response: z.string().min(2)
 });
@@ -36,11 +59,16 @@ function verdictFromScore(score: number): MatchResponse["verdict"] {
 }
 
 function ensureItems(values: string[] | undefined, fallback: string): string[] {
-  if (!values || values.length === 0) {
+  const sanitized = (values ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .filter((value) => !/^(none|n\/a|null|nu exista)$/i.test(value));
+
+  if (sanitized.length === 0) {
     return [fallback];
   }
 
-  return values.slice(0, 8);
+  return sanitized.slice(0, 8);
 }
 
 function clampScore(value: number | undefined, fallback: number) {
@@ -62,8 +90,8 @@ function normalizeAiMatch(raw: z.infer<typeof partialAiMatchSchema>): MatchRespo
     matchScore,
     verdict: raw.verdict ?? fallbackVerdict,
     summary: raw.summary,
-    matchedKeywords: (raw.matchedKeywords ?? []).slice(0, 20),
-    missingKeywords: (raw.missingKeywords ?? []).slice(0, 20),
+    matchedKeywords: ensureItems(raw.matchedKeywords, "Nu exista suprapuneri relevante confirmate clar de model.").slice(0, 20),
+    missingKeywords: ensureItems(raw.missingKeywords, "Modelul nu a enumerat lipsuri explicite.").slice(0, 20),
     strengths: ensureItems(raw.strengths, "Modelul nu a furnizat puncte forte explicite pentru aceasta comparatie."),
     risks: ensureItems(raw.risks, "Modelul nu a furnizat riscuri explicite; verifica manual diferentele dintre JD si CV."),
     recommendations: ensureItems(
@@ -80,24 +108,45 @@ function normalizeAiMatch(raw: z.infer<typeof partialAiMatchSchema>): MatchRespo
   };
 }
 
+function extractKeywordMatches(text: string): string[] {
+  const normalized = text.toLowerCase();
+
+  return Object.entries(KEYWORD_GROUPS)
+    .filter(([, aliases]) => aliases.some((alias) => normalized.includes(alias)))
+    .map(([keyword]) => keyword);
+}
+
 function buildPrompt(jobDescription: string, cv: string) {
+  const jdKeywords = extractKeywordMatches(jobDescription);
+  const cvKeywords = extractKeywordMatches(cv);
+  const sharedKeywords = jdKeywords.filter((keyword) => cvKeywords.includes(keyword));
+  const jdOnlyKeywords = jdKeywords.filter((keyword) => !cvKeywords.includes(keyword));
+
   return [
-    "You evaluate how well a CV matches a job description.",
-    "You are strict. A candidate from a clearly different profession must receive a very low score.",
-    "Return only valid JSON.",
-    "Do not include markdown fences or explanations.",
-    "Use this exact schema:",
+    "Evaluezi cat de bine se potriveste un CV cu un job description.",
+    "Raspunzi doar in limba romana.",
+    "Esti strict, dar nu ignori dovezile explicite din CV.",
+    "Daca exista overlap tehnic clar intre JD si CV, nu ai voie sa dai 0% sau 5%.",
+    "Returneaza doar JSON valid.",
+    "Nu include markdown fences sau explicatii in afara JSON-ului.",
+    "Foloseste exact aceasta schema:",
     '{"matchScore":0,"verdict":"strong-fit|partial-fit|weak-fit","summary":"string","matchedKeywords":["string"],"missingKeywords":["string"],"strengths":["string"],"risks":["string"],"recommendations":["string"],"breakdown":{"skills":0,"experience":0,"seniority":0,"domain":0,"communication":0}}',
-    "Rules:",
-    "- matchScore and every breakdown score must be integers from 0 to 100.",
-    "- verdict must align with matchScore: >=75 strong-fit, >=50 partial-fit, otherwise weak-fit.",
-    "- If the CV and the job description belong to clearly different domains or professions, the score must usually be between 0 and 20.",
-    "- Do not reward generic years of experience if they are from a different profession.",
-    "- If the job is non-technical and the CV is technical, or the reverse, classify it as a weak-fit unless there is explicit evidence of overlap.",
-    "- Use 80-100 only when there is strong, concrete overlap in domain, responsibilities, skills, and seniority.",
-    "- Keep strengths, risks, recommendations concise and specific.",
-    "- matchedKeywords and missingKeywords should be short technology or skill terms.",
-    "- summary, risks, and recommendations must explicitly say when the JD and CV appear to be from different professions.",
+    "Reguli:",
+    "- matchScore si toate scorurile din breakdown trebuie sa fie intregi intre 0 si 100.",
+    "- verdict trebuie sa fie aliniat cu matchScore: >=75 strong-fit, >=50 partial-fit, altfel weak-fit.",
+    "- Daca JD si CV sunt din profesii clar diferite, scorul trebuie de regula intre 0 si 20.",
+    "- Daca exista 5 sau mai multe suprapuneri tehnice clare intre JD si CV, scorul nu poate fi sub 35.",
+    "- Daca exista 2-4 suprapuneri tehnice clare, scorul nu poate fi 0 si de regula nu trebuie sa fie sub 20.",
+    "- Nu ignora experienta explicita din CV cu AWS, Azure, Terraform, Kubernetes, Docker, Ansible, GitLab CI, Jenkins, Prometheus, Grafana, Argo CD, Helm, Linux.",
+    "- Nu folosi valori placeholder precum 'none', 'None', 'N/A' sau liste goale mascate textual.",
+    "- strengths, risks si recommendations trebuie sa fie concrete si complete.",
+    "- matchedKeywords si missingKeywords trebuie sa fie termeni scurti de skill sau tehnologie.",
+    "- Daca exista suprapuneri, mentioneaza-le explicit in matchedKeywords si in summary.",
+    "",
+    `Semnale tehnice extrase din JD: ${jdKeywords.join(", ") || "niciunul"}`,
+    `Semnale tehnice extrase din CV: ${cvKeywords.join(", ") || "niciunul"}`,
+    `Suprapuneri tehnice detectate: ${sharedKeywords.join(", ") || "niciuna"}`,
+    `Cerinte tehnice din JD care nu apar in CV: ${jdOnlyKeywords.join(", ") || "niciuna"}`,
     "",
     "JOB DESCRIPTION:",
     jobDescription,
