@@ -28,15 +28,17 @@ const ollamaResponseSchema = z.object({
   response: z.string().min(2)
 });
 
+const stringListField = z.union([z.array(z.string()), z.string()]).optional();
+
 const partialAiMatchSchema = z.object({
   matchScore: z.number().min(0).max(100),
   verdict: z.enum(["strong-fit", "partial-fit", "weak-fit"]).optional(),
   summary: z.string().min(20),
-  matchedKeywords: z.array(z.string()).max(20).optional(),
-  missingKeywords: z.array(z.string()).max(20).optional(),
-  strengths: z.array(z.string()).max(8).optional(),
-  risks: z.array(z.string()).max(8).optional(),
-  recommendations: z.array(z.string()).max(8).optional(),
+  matchedKeywords: stringListField,
+  missingKeywords: stringListField,
+  strengths: stringListField,
+  risks: stringListField,
+  recommendations: stringListField,
   breakdown: z.object({
     skills: z.number().min(0).max(100).optional(),
     experience: z.number().min(0).max(100).optional(),
@@ -58,8 +60,23 @@ function verdictFromScore(score: number): MatchResponse["verdict"] {
   return "weak-fit";
 }
 
-function ensureItems(values: string[] | undefined, fallback: string): string[] {
-  const sanitized = (values ?? [])
+function toStringArray(values: string[] | string | undefined): string[] {
+  if (Array.isArray(values)) {
+    return values;
+  }
+
+  if (typeof values === "string") {
+    return values
+      .split(/\n|;|,\s*/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function ensureItems(values: string[] | string | undefined, fallback: string): string[] {
+  const sanitized = toStringArray(values)
     .map((value) => value.trim())
     .filter((value) => value.length > 0)
     .filter((value) => !/^(none|n\/a|null|nu exista)$/i.test(value));
