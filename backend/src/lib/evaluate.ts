@@ -169,7 +169,11 @@ function scoreSeniority(jobText: string, cvText: string): number {
   }
 
   const order = ["intern", "junior", "mid", "senior", "lead", "staff", "principal", "manager"];
-  const distance = Math.abs(order.indexOf(jobSeniority) - order.indexOf(cvSeniority));
+  const normalizedJobSeniority = jobSeniority ?? "mid";
+  const normalizedCvSeniority = cvSeniority ?? "mid";
+  const distance = Math.abs(
+    order.indexOf(normalizedJobSeniority) - order.indexOf(normalizedCvSeniority)
+  );
   return clamp(100 - distance * 18);
 }
 
