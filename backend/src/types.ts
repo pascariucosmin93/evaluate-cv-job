@@ -22,4 +22,6 @@ export type TailoredCvResponse = {
   tailoredCv: string;
   changesSummary: string[];
   notes: string[];
+  addedSkills: string[];
+  rejectedSkills: string[];
 };

@@ -57,7 +57,9 @@ const partialAiMatchSchema = z.object({
 const aiTailoredCvSchema = z.object({
   tailoredCv: z.string().min(100),
   changesSummary: z.union([z.array(z.string()), z.string()]).optional(),
-  notes: z.union([z.array(z.string()), z.string()]).optional()
+  notes: z.union([z.array(z.string()), z.string()]).optional(),
+  addedSkills: z.union([z.array(z.string()), z.string()]).optional(),
+  rejectedSkills: z.union([z.array(z.string()), z.string()]).optional()
 });
 
 function toStringArray(values: string[] | string | undefined): string[] {
@@ -168,6 +170,7 @@ function buildPrompt(jobDescription: string, cv: string) {
 
 function buildTailorCvPrompt(jobDescription: string, cv: string) {
   const deterministicResult = evaluateMatch(jobDescription, cv);
+  const missingKeywords = deterministicResult.missingKeywords;
 
   return [
     "Rescrii un CV pentru a se alinia mai bine cu un job description.",
@@ -175,22 +178,27 @@ function buildTailorCvPrompt(jobDescription: string, cv: string) {
     "Returneaza doar JSON valid.",
     "Nu include markdown fences sau explicatii in afara JSON-ului.",
     "Scopul nu este sa rescrii complet CV-ul, ci sa faci modificari minime si precise.",
+    "Vrei in mod explicit sa adaugi in CV skill-urile lipsa din JD, dar numai daca sunt sustinute rezonabil de dovezi sau context foarte apropiat din CV.",
     "Nu inventa experienta, proiecte, certificari, ani, tool-uri sau responsabilitati care nu apar in CV.",
     "Pastreaza informatia factuala din CV si structura generala a sectiunilor cat mai aproape de original.",
     "Ai voie sa reformulezi pentru claritate, sa muti accentul pe tehnologiile relevante si sa faci wording-ul mai apropiat de JD.",
-    "Daca o cerinta din JD nu este sustinuta de CV, nu o adauga ca experienta reala; eventual o poti mentiona prudent doar daca exista semnale foarte apropiate.",
+    "Daca o cerinta din JD este sustinuta de CV, dar nu este mentionata explicit, adaug-o explicit in tailoredCv.",
+    "Daca o cerinta din JD nu este sustinuta de CV, nu o adauga ca experienta reala.",
     "Foloseste exact aceasta schema:",
-    '{"tailoredCv":"string","changesSummary":["string"],"notes":["string"]}',
+    '{"tailoredCv":"string","changesSummary":["string"],"notes":["string"],"addedSkills":["string"],"rejectedSkills":["string"]}',
     "Reguli pentru tailoredCv:",
     "- pastreaza numele, contactul, companiile, perioadele si rolurile din CV",
     "- nu sterge sectiuni importante",
     "- schimba doar ce ajuta direct la relevanta pentru JD",
     "- optimizeaza summary-ul, bullet-urile si skills section",
     "- mentine CV-ul plauzibil si onest",
+    "- addedSkills trebuie sa contina skill-urile pe care le-ai introdus sau le-ai facut explicite in CV-ul nou",
+    "- rejectedSkills trebuie sa contina skill-urile din JD pe care nu le-ai putut adauga onest",
+    "- pentru fiecare skill lipsa, ia o decizie explicita: adaugat sau respins",
     "",
     `Scor curent estimat: ${deterministicResult.matchScore}%`,
     `Cerinte potrivite deja: ${deterministicResult.matchedKeywords.join(", ") || "niciuna"}`,
-    `Cerinte lipsa sau neexplicite: ${deterministicResult.missingKeywords.join(", ") || "niciuna"}`,
+    `Cerinte lipsa sau neexplicite: ${missingKeywords.join(", ") || "niciuna"}`,
     "",
     "JOB DESCRIPTION:",
     jobDescription,
@@ -290,6 +298,14 @@ export async function tailorCvWithOllama(jobDescription: string, cv: string): Pr
       notes: ensureItems(
         parsed.notes,
         "Verifica manual ca reformularile sa ramana complet fidele experientei tale reale."
+      ),
+      addedSkills: ensureItems(
+        parsed.addedSkills,
+        "AI-ul nu a confirmat skill-uri adaugate explicit."
+      ),
+      rejectedSkills: ensureItems(
+        parsed.rejectedSkills,
+        "AI-ul nu a marcat skill-uri respinse explicit."
       )
     };
   } catch (error) {

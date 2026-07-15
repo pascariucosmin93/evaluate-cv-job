@@ -29,6 +29,8 @@ type TailoredCvResponse = {
   tailoredCv: string;
   changesSummary: string[];
   notes: string[];
+  addedSkills: string[];
+  rejectedSkills: string[];
 };
 
 const BREAKDOWN_LABELS: Record<keyof Breakdown, string> = {
@@ -58,6 +60,131 @@ async function extractTextFromPdf(file: File) {
   );
 
   return pages.join("\n\n").trim();
+}
+
+function slugifyFilePart(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function escapePdfText(value: string) {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function wrapTextForPdf(text: string, maxLineLength = 92) {
+  const sourceLines = text.replace(/\r/g, "").split("\n");
+  const wrappedLines: string[] = [];
+
+  for (const sourceLine of sourceLines) {
+    const normalizedLine = sourceLine.trimEnd();
+
+    if (!normalizedLine) {
+      wrappedLines.push("");
+      continue;
+    }
+
+    let currentLine = "";
+    const words = normalizedLine.split(/\s+/);
+
+    for (const word of words) {
+      const candidate = currentLine ? `${currentLine} ${word}` : word;
+
+      if (candidate.length <= maxLineLength) {
+        currentLine = candidate;
+        continue;
+      }
+
+      if (currentLine) {
+        wrappedLines.push(currentLine);
+      }
+
+      currentLine = word;
+    }
+
+    if (currentLine) {
+      wrappedLines.push(currentLine);
+    }
+  }
+
+  return wrappedLines;
+}
+
+function buildPdfBlob(text: string) {
+  const lines = wrapTextForPdf(text);
+  const linesPerPage = 44;
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const fontSize = 11;
+  const lineHeight = 16;
+  const leftMargin = 48;
+  const topStart = 790;
+  const pages: string[] = [];
+
+  for (let index = 0; index < lines.length; index += linesPerPage) {
+    const pageLines = lines.slice(index, index + linesPerPage);
+    const contentLines = ["BT", `/F1 ${fontSize} Tf`];
+
+    pageLines.forEach((line, lineIndex) => {
+      const y = topStart - lineIndex * lineHeight;
+      contentLines.push(`1 0 0 1 ${leftMargin} ${y} Tm (${escapePdfText(line)}) Tj`);
+    });
+
+    contentLines.push("ET");
+    pages.push(contentLines.join("\n"));
+  }
+
+  const objects: string[] = [];
+  const addObject = (body: string) => {
+    objects.push(body);
+    return objects.length;
+  };
+
+  const fontObjectId = addObject("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  const contentObjectIds = pages.map((page) =>
+    addObject(`<< /Length ${page.length} >>\nstream\n${page}\nendstream`)
+  );
+
+  const pageObjectIds = contentObjectIds.map((contentObjectId) =>
+    addObject(
+      `<< /Type /Page /Parent 0 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentObjectId} 0 R >>`
+    )
+  );
+
+  const pagesObjectId = addObject(
+    `<< /Type /Pages /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageObjectIds.length} >>`
+  );
+
+  pageObjectIds.forEach((pageObjectId, index) => {
+    objects[pageObjectId - 1] = objects[pageObjectId - 1].replace("/Parent 0 0 R", `/Parent ${pagesObjectId} 0 R`);
+  });
+
+  const catalogObjectId = addObject(`<< /Type /Catalog /Pages ${pagesObjectId} 0 R >>`);
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+
+  objects.forEach((body, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+
+  for (let index = 1; index < offsets.length; index += 1) {
+    pdf += `${String(offsets[index]).padStart(10, "0")} 00000 n \n`;
+  }
+
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogObjectId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return new Blob([pdf], { type: "application/pdf" });
 }
 
 export default function Home() {
@@ -223,6 +350,26 @@ export default function Home() {
     } finally {
       setIsTailoring(false);
     }
+  }
+
+  function handleDownloadTailoredCv() {
+    if (!tailoredCvResult) {
+      return;
+    }
+
+    const cvName = cvFileName ? cvFileName.replace(/\.[^.]+$/, "") : "cv";
+    const jobName = jobTitle.trim() || tailoredCvResult.jobTitle || "job";
+    const fileName = `${slugifyFilePart(cvName)}-${slugifyFilePart(jobName)}-tailored.pdf`;
+    const blob = buildPdfBlob(tailoredCvResult.tailoredCv);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   const verdictLabel =
@@ -425,11 +572,23 @@ export default function Home() {
 
             {tailoredCvResult ? (
               <div className={styles.tailorSection}>
-                <h3>CV adaptat de AI</h3>
-                <p className={styles.tailorIntro}>
-                  AI-ul a pastrat structura CV-ului si a incercat sa schimbe
-                  doar wording-ul relevant pentru acest JD.
-                </p>
+                <div className={styles.tailorHeader}>
+                  <div>
+                    <h3>CV adaptat de AI</h3>
+                    <p className={styles.tailorIntro}>
+                      AI-ul a pastrat structura CV-ului si a incercat sa schimbe
+                      doar wording-ul relevant pentru acest JD.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className={styles.downloadButton}
+                    onClick={handleDownloadTailoredCv}
+                  >
+                    Download CV AI
+                  </button>
+                </div>
 
                 <div className={styles.columns}>
                   <div>
@@ -448,6 +607,30 @@ export default function Home() {
                         <li key={item}>{item}</li>
                       ))}
                     </ul>
+                  </div>
+                </div>
+
+                <div className={styles.columns}>
+                  <div>
+                    <h3>Skill-uri adaugate</h3>
+                    <div className={styles.tags}>
+                      {tailoredCvResult.addedSkills.map((item) => (
+                        <span className={styles.tag} key={item}>
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3>Skill-uri neadaugate</h3>
+                    <div className={styles.tags}>
+                      {tailoredCvResult.rejectedSkills.map((item) => (
+                        <span className={styles.tagWarning} key={item}>
+                          {item}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
