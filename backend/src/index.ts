@@ -4,7 +4,6 @@ import helmet from "helmet";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import { z } from "zod";
-import { evaluateMatch } from "./lib/evaluate.js";
 import { evaluateMatchWithOllama } from "./lib/ollama.js";
 
 const app = express();
@@ -54,14 +53,13 @@ app.post("/api/v1/evaluate", async (req, res) => {
   } catch (error) {
     req.log.warn(
       { error },
-      "Ollama evaluation failed, falling back to heuristic scoring"
+      "Ollama evaluation failed"
     );
-
-    const result = evaluateMatch(parsed.data.jobDescription, parsed.data.cv);
-
-    res.status(200).json({
-      jobTitle: parsed.data.jobTitle ?? null,
-      ...result
+    res.status(503).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "AI evaluation is currently unavailable."
     });
   }
 });

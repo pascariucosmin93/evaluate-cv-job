@@ -26,6 +26,7 @@ const aiMatchSchema: z.ZodType<MatchResponse> = z.object({
 function buildPrompt(jobDescription: string, cv: string) {
   return [
     "You evaluate how well a CV matches a job description.",
+    "You are strict. A candidate from a clearly different profession must receive a very low score.",
     "Return only valid JSON.",
     "Do not include markdown fences or explanations.",
     "Use this exact schema:",
@@ -33,8 +34,13 @@ function buildPrompt(jobDescription: string, cv: string) {
     "Rules:",
     "- matchScore and every breakdown score must be integers from 0 to 100.",
     "- verdict must align with matchScore: >=75 strong-fit, >=50 partial-fit, otherwise weak-fit.",
+    "- If the CV and the job description belong to clearly different domains or professions, the score must usually be between 0 and 20.",
+    "- Do not reward generic years of experience if they are from a different profession.",
+    "- If the job is non-technical and the CV is technical, or the reverse, classify it as a weak-fit unless there is explicit evidence of overlap.",
+    "- Use 80-100 only when there is strong, concrete overlap in domain, responsibilities, skills, and seniority.",
     "- Keep strengths, risks, recommendations concise and specific.",
     "- matchedKeywords and missingKeywords should be short technology or skill terms.",
+    "- summary, risks, and recommendations must explicitly say when the JD and CV appear to be from different professions.",
     "",
     "JOB DESCRIPTION:",
     jobDescription,
@@ -85,6 +91,12 @@ export async function evaluateMatchWithOllama(jobDescription: string, cv: string
         communication: Math.round(parsedMatch.breakdown.communication)
       }
     };
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`AI evaluation failed: ${error.message}`);
+    }
+
+    throw new Error("AI evaluation failed.");
   } finally {
     clearTimeout(timeout);
   }
