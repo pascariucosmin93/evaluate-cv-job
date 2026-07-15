@@ -5,23 +5,80 @@ const ollamaResponseSchema = z.object({
   response: z.string().min(2)
 });
 
-const aiMatchSchema: z.ZodType<MatchResponse> = z.object({
+const partialAiMatchSchema = z.object({
   matchScore: z.number().min(0).max(100),
-  verdict: z.enum(["strong-fit", "partial-fit", "weak-fit"]),
+  verdict: z.enum(["strong-fit", "partial-fit", "weak-fit"]).optional(),
   summary: z.string().min(20),
-  matchedKeywords: z.array(z.string()).max(20),
-  missingKeywords: z.array(z.string()).max(20),
-  strengths: z.array(z.string()).min(1).max(8),
-  risks: z.array(z.string()).min(1).max(8),
-  recommendations: z.array(z.string()).min(1).max(8),
+  matchedKeywords: z.array(z.string()).max(20).optional(),
+  missingKeywords: z.array(z.string()).max(20).optional(),
+  strengths: z.array(z.string()).max(8).optional(),
+  risks: z.array(z.string()).max(8).optional(),
+  recommendations: z.array(z.string()).max(8).optional(),
   breakdown: z.object({
-    skills: z.number().min(0).max(100),
-    experience: z.number().min(0).max(100),
-    seniority: z.number().min(0).max(100),
-    domain: z.number().min(0).max(100),
-    communication: z.number().min(0).max(100)
-  })
+    skills: z.number().min(0).max(100).optional(),
+    experience: z.number().min(0).max(100).optional(),
+    seniority: z.number().min(0).max(100).optional(),
+    domain: z.number().min(0).max(100).optional(),
+    communication: z.number().min(0).max(100).optional()
+  }).optional()
 });
+
+function verdictFromScore(score: number): MatchResponse["verdict"] {
+  if (score >= 75) {
+    return "strong-fit";
+  }
+
+  if (score >= 50) {
+    return "partial-fit";
+  }
+
+  return "weak-fit";
+}
+
+function ensureItems(values: string[] | undefined, fallback: string): string[] {
+  if (!values || values.length === 0) {
+    return [fallback];
+  }
+
+  return values.slice(0, 8);
+}
+
+function clampScore(value: number | undefined, fallback: number) {
+  return Math.max(0, Math.min(100, Math.round(value ?? fallback)));
+}
+
+function normalizeAiMatch(raw: z.infer<typeof partialAiMatchSchema>): MatchResponse {
+  const matchScore = clampScore(raw.matchScore, 0);
+  const fallbackVerdict = verdictFromScore(matchScore);
+  const fallbackBreakdown = {
+    skills: matchScore,
+    experience: matchScore,
+    seniority: matchScore,
+    domain: matchScore,
+    communication: matchScore
+  };
+
+  return {
+    matchScore,
+    verdict: raw.verdict ?? fallbackVerdict,
+    summary: raw.summary,
+    matchedKeywords: (raw.matchedKeywords ?? []).slice(0, 20),
+    missingKeywords: (raw.missingKeywords ?? []).slice(0, 20),
+    strengths: ensureItems(raw.strengths, "Modelul nu a furnizat puncte forte explicite pentru aceasta comparatie."),
+    risks: ensureItems(raw.risks, "Modelul nu a furnizat riscuri explicite; verifica manual diferentele dintre JD si CV."),
+    recommendations: ensureItems(
+      raw.recommendations,
+      "Solicita modelului o analiza mai detaliata daca raspunsul actual este prea sumar."
+    ),
+    breakdown: {
+      skills: clampScore(raw.breakdown?.skills, fallbackBreakdown.skills),
+      experience: clampScore(raw.breakdown?.experience, fallbackBreakdown.experience),
+      seniority: clampScore(raw.breakdown?.seniority, fallbackBreakdown.seniority),
+      domain: clampScore(raw.breakdown?.domain, fallbackBreakdown.domain),
+      communication: clampScore(raw.breakdown?.communication, fallbackBreakdown.communication)
+    }
+  };
+}
 
 function buildPrompt(jobDescription: string, cv: string) {
   return [
@@ -78,19 +135,9 @@ export async function evaluateMatchWithOllama(jobDescription: string, cv: string
     }
 
     const responsePayload = ollamaResponseSchema.parse(await response.json());
-    const parsedMatch = aiMatchSchema.parse(JSON.parse(responsePayload.response));
+    const parsedMatch = partialAiMatchSchema.parse(JSON.parse(responsePayload.response));
 
-    return {
-      ...parsedMatch,
-      matchScore: Math.round(parsedMatch.matchScore),
-      breakdown: {
-        skills: Math.round(parsedMatch.breakdown.skills),
-        experience: Math.round(parsedMatch.breakdown.experience),
-        seniority: Math.round(parsedMatch.breakdown.seniority),
-        domain: Math.round(parsedMatch.breakdown.domain),
-        communication: Math.round(parsedMatch.breakdown.communication)
-      }
-    };
+    return normalizeAiMatch(parsedMatch);
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`AI evaluation failed: ${error.message}`);
