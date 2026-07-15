@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
   pull_request:
 
 env:
@@ -13,7 +11,39 @@ env:
   IMAGE_NAMESPACE: ${{ github.repository_owner }}
 
 jobs:
+  prepare-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next Docker version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          latest_tag="$(git tag --list 'docker-v0.0.*' --sort=-version:refname | head -n 1)"
+
+          if [ -z "$latest_tag" ]; then
+            next_version="0.0.1"
+          else
+            patch="${latest_tag##*.}"
+            next_version="0.0.$((patch + 1))"
+          fi
+
+          echo "version=$next_version" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare-version
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -51,10 +81,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}
           tags: |
-            type=ref,event=branch
             type=ref,event=pr
-            type=semver,pattern={{version}}
             type=sha
+            type=raw,value=main,enable=${{ github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ needs.prepare-version.outputs.version }},enable=${{ github.event_name == 'push' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -66,3 +97,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  tag-release:
+    if: github.event_name == 'push'
+    needs:
+      - prepare-version
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Docker version tag
+        env:
+          VERSION: ${{ needs.prepare-version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "docker-v$VERSION"
+          git push origin "docker-v$VERSION"
