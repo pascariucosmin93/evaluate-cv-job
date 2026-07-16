@@ -102,6 +102,13 @@ function normalizeAiMatch(
   raw: z.infer<typeof partialAiMatchSchema>,
   deterministicResult: MatchResponse
 ): MatchResponse {
+  const hardMismatch =
+    deterministicResult.matchScore <= 20 && deterministicResult.matchedKeywords.length === 0;
+
+  if (hardMismatch) {
+    return deterministicResult;
+  }
+
   const matchScore = Math.round(raw.matchScore);
   const breakdown = raw.breakdown
     ? {

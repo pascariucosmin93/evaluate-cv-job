@@ -279,7 +279,10 @@ export function evaluateMatch(jobDescription: string, cv: string): MatchResponse
   const skillResult = scoreSkills(jobKeywords, cvKeywords);
   const jobLooksTechnical = looksTechnical(normalizedJob);
   const cvLooksTechnical = looksTechnical(normalizedCv);
-  const clearlyDifferentDomains = !jobLooksTechnical && cvLooksTechnical;
+  // Reject both directions of an obvious domain mismatch. A technical JD
+  // paired with non-technical text (for example song lyrics) must not receive
+  // a positive score from model defaults or hallucinated overlap.
+  const clearlyDifferentDomains = jobLooksTechnical !== cvLooksTechnical;
 
   const breakdown: ScoreBreakdown = {
     skills: Math.round(skillResult.score),
