@@ -32,7 +32,7 @@ services:
       - evaluate-network
 
   backend:
-    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:0.0.10
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:latest
     container_name: evaluate-cv-backend
     restart: unless-stopped
     depends_on:
@@ -48,7 +48,7 @@ services:
       - evaluate-network
 
   frontend:
-    image: ghcr.io/pascariucosmin93/evaluate-cv-job-frontend:0.0.10
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-frontend:latest
     container_name: evaluate-cv-frontend
     restart: unless-stopped
     depends_on:

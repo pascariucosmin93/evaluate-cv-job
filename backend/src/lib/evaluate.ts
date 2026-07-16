@@ -300,24 +300,23 @@ export function evaluateMatch(jobDescription: string, cv: string): MatchResponse
   );
 
   if (clearlyDifferentDomains) {
-    breakdown.skills = Math.min(breakdown.skills, 5);
-    breakdown.experience = Math.min(breakdown.experience, 15);
-    breakdown.seniority = Math.min(breakdown.seniority, 20);
-    breakdown.domain = Math.min(breakdown.domain, 5);
-    breakdown.communication = Math.min(breakdown.communication, 30);
-    matchScore = Math.min(matchScore, 12);
-  }
+    // Un JD non-tehnic si un CV tehnic nu ofera dovezi comparabile pentru
+    // niciuna dintre categoriile de potrivire. Nu afisam scoruri implicite
+    // pentru senioritate, experienta sau colaborare in acest caz.
+    breakdown.skills = 0;
+    breakdown.experience = 0;
+    breakdown.seniority = 0;
+    breakdown.domain = 0;
+    breakdown.communication = 0;
+    matchScore = 0;
+  } else {
+    if (skillResult.matched.length >= 5) {
+      matchScore = Math.max(matchScore, 60);
+    }
 
-  if (skillResult.matched.length >= 5) {
-    matchScore = Math.max(matchScore, 60);
-  }
-
-  if (skillResult.matched.length >= 7) {
-    matchScore = Math.max(matchScore, 70);
-  }
-
-  if (clearlyDifferentDomains) {
-    matchScore = Math.min(matchScore, 12);
+    if (skillResult.matched.length >= 7) {
+      matchScore = Math.max(matchScore, 70);
+    }
   }
 
   const verdict = verdictFromScore(matchScore);

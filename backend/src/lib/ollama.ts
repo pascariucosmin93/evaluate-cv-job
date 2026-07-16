@@ -90,16 +90,37 @@ function ensureItems(values: string[] | string | undefined, fallback: string): s
   return sanitized.slice(0, 8);
 }
 
+function optionalItems(values: string[] | string | undefined): string[] {
+  return toStringArray(values)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .filter((value) => !/^(none|n\/a|null|nu exista)$/i.test(value))
+    .slice(0, 12);
+}
+
 function normalizeAiMatch(
   raw: z.infer<typeof partialAiMatchSchema>,
   deterministicResult: MatchResponse
 ): MatchResponse {
+  const matchScore = Math.round(raw.matchScore);
+  const breakdown = raw.breakdown
+    ? {
+        skills: Math.round(raw.breakdown.skills ?? deterministicResult.breakdown.skills),
+        experience: Math.round(raw.breakdown.experience ?? deterministicResult.breakdown.experience),
+        seniority: Math.round(raw.breakdown.seniority ?? deterministicResult.breakdown.seniority),
+        domain: Math.round(raw.breakdown.domain ?? deterministicResult.breakdown.domain),
+        communication: Math.round(
+          raw.breakdown.communication ?? deterministicResult.breakdown.communication
+        )
+      }
+    : deterministicResult.breakdown;
+
   return {
-    matchScore: deterministicResult.matchScore,
-    verdict: deterministicResult.verdict,
-    summary: deterministicResult.summary,
-    matchedKeywords: deterministicResult.matchedKeywords,
-    missingKeywords: deterministicResult.missingKeywords,
+    matchScore,
+    verdict: matchScore >= 75 ? "strong-fit" : matchScore >= 50 ? "partial-fit" : "weak-fit",
+    summary: raw.summary,
+    matchedKeywords: optionalItems(raw.matchedKeywords),
+    missingKeywords: optionalItems(raw.missingKeywords),
     strengths: ensureItems(
       raw.strengths,
       deterministicResult.strengths[0] ?? "Analiza nu a produs puncte forte suplimentare."
@@ -112,7 +133,7 @@ function normalizeAiMatch(
       raw.recommendations,
       deterministicResult.recommendations[0] ?? "Actualizeaza CV-ul astfel incat cerintele cheie sa fie vizibile explicit."
     ),
-    breakdown: deterministicResult.breakdown
+    breakdown
   };
 }
 
@@ -156,7 +177,7 @@ function buildPrompt(jobDescription: string, cv: string) {
     "Evaluezi cat de bine se potriveste un CV cu un job description.",
     "Raspunzi doar in limba romana.",
     "Esti strict, dar nu ignori dovezile explicite din CV.",
-    "Daca exista overlap tehnic clar intre JD si CV, nu ai voie sa dai 0% sau 5%.",
+    "Compara toate cerintele si responsabilitatile din JD cu dovezile din CV, inclusiv tehnologii sau concepte care nu exista in nicio lista prestabilita.",
     "Returneaza doar JSON valid.",
     "Nu include markdown fences sau explicatii in afara JSON-ului.",
     "Foloseste exact aceasta schema:",
@@ -165,21 +186,19 @@ function buildPrompt(jobDescription: string, cv: string) {
     "- matchScore si toate scorurile din breakdown trebuie sa fie intregi intre 0 si 100.",
     "- verdict trebuie sa fie aliniat cu matchScore: >=75 strong-fit, >=50 partial-fit, altfel weak-fit.",
     "- Daca JD si CV sunt din profesii clar diferite, scorul trebuie de regula intre 0 si 20.",
-    "- Daca exista 5 sau mai multe suprapuneri tehnice clare intre JD si CV, scorul nu poate fi sub 35.",
-    "- Daca exista 2-4 suprapuneri tehnice clare, scorul nu poate fi 0 si de regula nu trebuie sa fie sub 20.",
-    "- Nu ignora experienta explicita din CV cu AWS, Azure, Terraform, Kubernetes, Docker, Ansible, GitLab CI, Jenkins, Prometheus, Grafana, Argo CD, Helm, Linux.",
+    "- Nu limita analiza la exemplele de tehnologii din prompt; extrage si compara cerintele specifice acestui JD.",
     "- Nu folosi valori placeholder precum 'none', 'None', 'N/A' sau liste goale mascate textual.",
     "- strengths, risks si recommendations trebuie sa fie concrete si complete.",
     "- matchedKeywords si missingKeywords trebuie sa fie termeni scurti de skill sau tehnologie.",
     "- Daca exista suprapuneri, mentioneaza-le explicit in matchedKeywords si in summary.",
-    "- Pastreaza analiza consecventa cu scorul determinist primit mai jos; nu il contrazice textual.",
+    "- matchScore si breakdown trebuie sa reflecte comparatia ta efectiva dintre acest JD si acest CV.",
     "",
     `Scor determinist calculat deja: ${deterministicResult.matchScore}%`,
     `Breakdown determinist: skills=${deterministicResult.breakdown.skills}, experience=${deterministicResult.breakdown.experience}, seniority=${deterministicResult.breakdown.seniority}, domain=${deterministicResult.breakdown.domain}, communication=${deterministicResult.breakdown.communication}`,
-    `Semnale tehnice extrase din JD: ${jdKeywords.join(", ") || "niciunul"}`,
-    `Semnale tehnice extrase din CV: ${cvKeywords.join(", ") || "niciunul"}`,
-    `Suprapuneri tehnice detectate: ${sharedKeywords.join(", ") || "niciuna"}`,
-    `Cerinte tehnice din JD care nu apar in CV: ${jdOnlyKeywords.join(", ") || "niciuna"}`,
+    `Semnale orientative extrase automat din JD: ${jdKeywords.join(", ") || "niciunul"}`,
+    `Semnale orientative extrase automat din CV: ${cvKeywords.join(", ") || "niciunul"}`,
+    `Suprapuneri orientative detectate: ${sharedKeywords.join(", ") || "niciuna"}`,
+    `Cerinte orientative din JD care nu apar in CV: ${jdOnlyKeywords.join(", ") || "niciuna"}`,
     "",
     "JOB DESCRIPTION:",
     jobDescription,
