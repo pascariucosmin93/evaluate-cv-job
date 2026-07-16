@@ -27,3 +27,33 @@ export type TailoredCvResponse = {
   blocked: boolean;
   blockReason: string | null;
 };
+
+export type JobPayload = {
+  jobDescription: string;
+  cv: string;
+  jobTitle?: string;
+};
+
+export type EvaluationApiResponse = MatchResponse & {
+  jobTitle: string | null;
+};
+
+export type TailoredCvApiResponse = TailoredCvResponse & {
+  jobTitle: string | null;
+};
+
+export type JobType = "evaluate" | "tailor-cv";
+export type JobStatus = "pending" | "processing" | "completed" | "failed";
+
+export type JobResult = EvaluationApiResponse | TailoredCvApiResponse;
+
+export type JobRecord = {
+  id: string;
+  type: JobType;
+  status: JobStatus;
+  payload: JobPayload;
+  result: JobResult | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};

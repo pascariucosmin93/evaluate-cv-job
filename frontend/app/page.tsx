@@ -35,6 +35,21 @@ type TailoredCvResponse = {
   blockReason: string | null;
 };
 
+type JobStartResponse = {
+  jobId: string;
+  status: "pending" | "processing";
+};
+
+type JobStatusResponse = {
+  id: string;
+  type: "evaluate" | "tailor-cv";
+  status: "pending" | "processing" | "completed" | "failed";
+  result: EvaluationResponse | TailoredCvResponse | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 const BREAKDOWN_LABELS: Record<keyof Breakdown, string> = {
   skills: "Skill match",
   experience: "Experienta relevanta",
@@ -221,6 +236,7 @@ export default function Home() {
   const [result, setResult] = useState<EvaluationResponse | null>(null);
   const [tailoredCvResult, setTailoredCvResult] = useState<TailoredCvResponse | null>(null);
   const [error, setError] = useState("");
+  const [jobMessage, setJobMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isTailoring, setIsTailoring] = useState(false);
   const [isReadingFile, setIsReadingFile] = useState(false);
@@ -229,6 +245,47 @@ export default function Home() {
     () => process.env.NEXT_PUBLIC_API_BASE_URL || "/api",
     []
   );
+
+  async function sleep(ms: number) {
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  async function waitForJob<T>(jobId: string, pendingLabel: string): Promise<T> {
+    for (let attempt = 0; attempt < 180; attempt += 1) {
+      const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}`, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Nu am putut verifica statusul jobului.");
+      }
+
+      const payload = (await response.json()) as JobStatusResponse;
+
+      if (payload.status === "completed") {
+        if (!payload.result) {
+          throw new Error("Jobul s-a incheiat fara rezultat.");
+        }
+
+        setJobMessage("");
+        return payload.result as T;
+      }
+
+      if (payload.status === "failed") {
+        setJobMessage("");
+        throw new Error(payload.error || "Jobul AI a esuat.");
+      }
+
+      setJobMessage(`${pendingLabel} Job ${payload.status}...`);
+      await sleep(2000);
+    }
+
+    setJobMessage("");
+    throw new Error("Jobul AI a depasit timpul maxim de asteptare.");
+  }
 
   async function handleCvFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -239,6 +296,7 @@ export default function Home() {
     setHasUploadedCv(false);
     setResult(null);
     setTailoredCvResult(null);
+    setJobMessage("");
 
     if (!file) {
       return;
@@ -293,6 +351,7 @@ export default function Home() {
     setIsLoading(true);
     setError("");
     setTailoredCvResult(null);
+    setJobMessage("");
 
     if (!hasUploadedCv || !cv) {
       setIsLoading(false);
@@ -318,9 +377,15 @@ export default function Home() {
         throw new Error(payload?.message || "Request failed.");
       }
 
-      const payload = (await response.json()) as EvaluationResponse;
+      const job = (await response.json()) as JobStartResponse;
+      setJobMessage("Cererea a fost pusa in coada. Astept evaluarea AI...");
+      const payload = await waitForJob<EvaluationResponse>(
+        job.jobId,
+        "Evaluarea AI ruleaza."
+      );
       setResult(payload);
     } catch (submitError) {
+      setJobMessage("");
       setError(
         submitError instanceof Error
           ? submitError.message
@@ -333,6 +398,7 @@ export default function Home() {
 
   async function handleTailorCv() {
     setError("");
+    setJobMessage("");
 
     if (!hasUploadedCv || !cv) {
       setError("Incarca un CV PDF valid inainte sa generezi varianta adaptata.");
@@ -364,9 +430,15 @@ export default function Home() {
         throw new Error(payload?.message || "Request failed.");
       }
 
-      const payload = (await response.json()) as TailoredCvResponse;
+      const job = (await response.json()) as JobStartResponse;
+      setJobMessage("Cererea a fost pusa in coada. Generez CV-ul adaptat...");
+      const payload = await waitForJob<TailoredCvResponse>(
+        job.jobId,
+        "Adaptarea CV-ului ruleaza."
+      );
       setTailoredCvResult(payload);
     } catch (submitError) {
+      setJobMessage("");
       setError(
         submitError instanceof Error
           ? submitError.message
@@ -486,6 +558,7 @@ export default function Home() {
               {isTailoring ? "Generez CV-ul adaptat..." : "Genereaza CV adaptat pe JD"}
             </button>
 
+            {jobMessage ? <p className={styles.fileStatus}>{jobMessage}</p> : null}
             {error ? <p className={styles.error}>{error}</p> : null}
           </form>
 

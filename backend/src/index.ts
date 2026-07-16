@@ -4,7 +4,7 @@ import helmet from "helmet";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import { z } from "zod";
-import { evaluateMatchWithOllama, tailorCvWithOllama } from "./lib/ollama.js";
+import { enqueueJob, getJob } from "./lib/queue.js";
 
 const app = express();
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
@@ -28,7 +28,7 @@ app.use(pinoHttp({ logger }));
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
-    service: "evaluate-cv-job-backend"
+    service: "evaluate-cv-job-backend-api"
   });
 });
 
@@ -43,25 +43,12 @@ app.post("/api/v1/evaluate", async (req, res) => {
     return;
   }
 
-  try {
-    const result = await evaluateMatchWithOllama(parsed.data.jobDescription, parsed.data.cv);
+  const job = await enqueueJob("evaluate", parsed.data);
 
-    res.status(200).json({
-      jobTitle: parsed.data.jobTitle ?? null,
-      ...result
-    });
-  } catch (error) {
-    req.log.warn(
-      { error },
-      "Ollama evaluation failed"
-    );
-    res.status(503).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "AI evaluation is currently unavailable."
-    });
-  }
+  res.status(202).json({
+    jobId: job.id,
+    status: job.status
+  });
 });
 
 app.post("/api/v1/tailor-cv", async (req, res) => {
@@ -75,25 +62,33 @@ app.post("/api/v1/tailor-cv", async (req, res) => {
     return;
   }
 
-  try {
-    const result = await tailorCvWithOllama(parsed.data.jobDescription, parsed.data.cv);
+  const job = await enqueueJob("tailor-cv", parsed.data);
 
-    res.status(200).json({
-      jobTitle: parsed.data.jobTitle ?? null,
-      ...result
+  res.status(202).json({
+    jobId: job.id,
+    status: job.status
+  });
+});
+
+app.get("/api/v1/jobs/:jobId", async (req, res) => {
+  const job = await getJob(req.params.jobId);
+
+  if (!job) {
+    res.status(404).json({
+      message: "Job not found."
     });
-  } catch (error) {
-    req.log.warn(
-      { error },
-      "Ollama CV tailoring failed"
-    );
-    res.status(503).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "AI CV tailoring is currently unavailable."
-    });
+    return;
   }
+
+  res.status(200).json({
+    id: job.id,
+    type: job.type,
+    status: job.status,
+    result: job.result,
+    error: job.error,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt
+  });
 });
 
 app.use((_req, res) => {
