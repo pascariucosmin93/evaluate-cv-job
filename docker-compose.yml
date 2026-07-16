@@ -14,8 +14,7 @@ services:
       - evaluate-network
 
   frontend:
-    build:
-      context: ./frontend
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-frontend:latest
     container_name: evaluate-cv-job-frontend
     restart: unless-stopped
     depends_on:
@@ -23,6 +22,7 @@ services:
         condition: service_healthy
     environment:
       PORT: 3000
+      HOSTNAME: 0.0.0.0
       API_BASE_URL: http://backend-api:8080
     networks:
       - evaluate-network
@@ -34,8 +34,7 @@ services:
       start_period: 20s
 
   backend-api:
-    build:
-      context: ./backend
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:latest
     container_name: evaluate-cv-job-backend-api
     restart: unless-stopped
     depends_on:
@@ -58,8 +57,7 @@ services:
       start_period: 20s
 
   worker:
-    build:
-      context: ./backend
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:latest
     container_name: evaluate-cv-job-worker
     restart: unless-stopped
     command: ["node", "dist/worker.js"]
