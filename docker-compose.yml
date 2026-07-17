@@ -14,7 +14,7 @@ services:
       - evaluate-network
 
   frontend:
-    image: ghcr.io/pascariucosmin93/evaluate-cv-job-frontend:latest
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-frontend:0.0.20
     container_name: evaluate-cv-job-frontend
     restart: unless-stopped
     depends_on:
@@ -34,7 +34,7 @@ services:
       start_period: 20s
 
   backend-api:
-    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:latest
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:0.0.20
     container_name: evaluate-cv-job-backend-api
     restart: unless-stopped
     depends_on:
@@ -57,7 +57,7 @@ services:
       start_period: 20s
 
   worker:
-    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:latest
+    image: ghcr.io/pascariucosmin93/evaluate-cv-job-backend:0.0.20
     container_name: evaluate-cv-job-worker
     restart: unless-stopped
     command: ["node", "dist/worker.js"]

@@ -77,7 +77,7 @@ function normalizeAiMatch(
   const hardMismatch =
     deterministicResult.matchScore <= 20 && deterministicResult.matchedKeywords.length === 0;
 
-  if (hardMismatch) {
+  if (hardMismatch || deterministicResult.domainMismatch) {
     return deterministicResult;
   }
 
@@ -101,7 +101,7 @@ function normalizeAiMatch(
     detectedCvDomain: deterministicResult.detectedCvDomain,
     detectedJobDomain: deterministicResult.detectedJobDomain,
     domainMismatch: deterministicResult.domainMismatch,
-    matchedKeywords: optionalItems(raw.matchedKeywords),
+    matchedKeywords: deterministicResult.matchedKeywords,
     missingKeywords: optionalItems(raw.missingKeywords),
     strengths: ensureItems(
       raw.strengths,
