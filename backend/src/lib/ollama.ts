@@ -2,34 +2,6 @@ import { z } from "zod";
 import { MatchResponse, TailoredCvResponse } from "../types.js";
 import { evaluateMatch } from "./evaluate.js";
 
-const KEYWORD_GROUPS: Record<string, string[]> = {
-  aws: ["aws", "ec2", "ecs", "eks", "cloudformation"],
-  azure: ["azure", "aks", "azure devops", "azure monitor", "azure key vault"],
-  terraform: ["terraform"],
-  kubernetes: ["kubernetes", "k8s", "eks", "aks"],
-  docker: ["docker", "containers"],
-  ansible: ["ansible"],
-  gitlab_ci: ["gitlab ci", "gitlab"],
-  github_actions: ["github actions"],
-  jenkins: ["jenkins"],
-  grafana: ["grafana"],
-  sentry: ["sentry"],
-  prometheus: ["prometheus"],
-  loki: ["loki"],
-  vault: ["vault", "hashicorp vault"],
-  linux: ["linux", "ubuntu", "debian", "centos"],
-  argocd: ["argo cd", "argocd"],
-  gitops: ["gitops"],
-  helm: ["helm"],
-  webhooks: ["webhook", "webhooks", "teams notification", "microsoft teams notification"],
-  teams: ["microsoft teams", "teams notification", "teams webhook"],
-  unity_cloud_build: ["unity cloud build", "cloud build for unity"],
-  bash: ["bash"],
-  powershell: ["powershell"],
-  networking: ["dns", "nginx", "haproxy", "keepalived", "networking"],
-  observability: ["observability", "monitoring", "cloudwatch"]
-};
-
 const ollamaResponseSchema = z.object({
   response: z.string().min(2)
 });
@@ -126,6 +98,9 @@ function normalizeAiMatch(
     matchScore,
     verdict: matchScore >= 75 ? "strong-fit" : matchScore >= 50 ? "partial-fit" : "weak-fit",
     summary: raw.summary,
+    detectedCvDomain: deterministicResult.detectedCvDomain,
+    detectedJobDomain: deterministicResult.detectedJobDomain,
+    domainMismatch: deterministicResult.domainMismatch,
     matchedKeywords: optionalItems(raw.matchedKeywords),
     missingKeywords: optionalItems(raw.missingKeywords),
     strengths: ensureItems(
@@ -142,14 +117,6 @@ function normalizeAiMatch(
     ),
     breakdown
   };
-}
-
-function extractKeywordMatches(text: string): string[] {
-  const normalized = text.toLowerCase();
-
-  return Object.entries(KEYWORD_GROUPS)
-    .filter(([, aliases]) => aliases.some((alias) => normalized.includes(alias)))
-    .map(([keyword]) => keyword);
 }
 
 function compressCvForTailoring(cv: string, relevantKeywords: string[]) {
@@ -175,16 +142,12 @@ function compressCvForTailoring(cv: string, relevantKeywords: string[]) {
 
 function buildPrompt(jobDescription: string, cv: string) {
   const deterministicResult = evaluateMatch(jobDescription, cv);
-  const jdKeywords = extractKeywordMatches(jobDescription);
-  const cvKeywords = extractKeywordMatches(cv);
-  const sharedKeywords = jdKeywords.filter((keyword) => cvKeywords.includes(keyword));
-  const jdOnlyKeywords = jdKeywords.filter((keyword) => !cvKeywords.includes(keyword));
 
   return [
     "Evaluezi cat de bine se potriveste un CV cu un job description.",
     "Raspunzi doar in limba romana.",
     "Esti strict, dar nu ignori dovezile explicite din CV.",
-    "Compara toate cerintele si responsabilitatile din JD cu dovezile din CV, inclusiv tehnologii sau concepte care nu exista in nicio lista prestabilita.",
+    "Mai intai identifica domeniul principal al jobului si al CV-ului, apoi compara cerintele si responsabilitatile folosind acel context.",
     "Returneaza doar JSON valid.",
     "Nu include markdown fences sau explicatii in afara JSON-ului.",
     "Foloseste exact aceasta schema:",
@@ -196,16 +159,16 @@ function buildPrompt(jobDescription: string, cv: string) {
     "- Nu limita analiza la exemplele de tehnologii din prompt; extrage si compara cerintele specifice acestui JD.",
     "- Nu folosi valori placeholder precum 'none', 'None', 'N/A' sau liste goale mascate textual.",
     "- strengths, risks si recommendations trebuie sa fie concrete si complete.",
-    "- matchedKeywords si missingKeywords trebuie sa fie termeni scurti de skill sau tehnologie.",
+    "- matchedKeywords si missingKeywords trebuie sa fie termeni scurti de skill, responsabilitate sau unealta relevanta pentru profesia analizata.",
     "- Daca exista suprapuneri, mentioneaza-le explicit in matchedKeywords si in summary.",
     "- matchScore si breakdown trebuie sa reflecte comparatia ta efectiva dintre acest JD si acest CV.",
     "",
     `Scor determinist calculat deja: ${deterministicResult.matchScore}%`,
     `Breakdown determinist: skills=${deterministicResult.breakdown.skills}, experience=${deterministicResult.breakdown.experience}, seniority=${deterministicResult.breakdown.seniority}, domain=${deterministicResult.breakdown.domain}, communication=${deterministicResult.breakdown.communication}`,
-    `Semnale orientative extrase automat din JD: ${jdKeywords.join(", ") || "niciunul"}`,
-    `Semnale orientative extrase automat din CV: ${cvKeywords.join(", ") || "niciunul"}`,
-    `Suprapuneri orientative detectate: ${sharedKeywords.join(", ") || "niciuna"}`,
-    `Cerinte orientative din JD care nu apar in CV: ${jdOnlyKeywords.join(", ") || "niciuna"}`,
+    `Domeniu detectat pentru JD: ${deterministicResult.detectedJobDomain.label} (${deterministicResult.detectedJobDomain.confidence}%)`,
+    `Domeniu detectat pentru CV: ${deterministicResult.detectedCvDomain.label} (${deterministicResult.detectedCvDomain.confidence}%)`,
+    `Suprapuneri orientative detectate: ${deterministicResult.matchedKeywords.join(", ") || "niciuna"}`,
+    `Cerinte orientative din JD care nu apar in CV: ${deterministicResult.missingKeywords.join(", ") || "niciuna"}`,
     "",
     "JOB DESCRIPTION:",
     jobDescription,
@@ -306,11 +269,11 @@ export async function tailorCvWithOllama(jobDescription: string, cv: string): Pr
   const deterministicResult = evaluateMatch(jobDescription, cv);
   const rejectedKeywords = deterministicResult.missingKeywords.length > 0
     ? deterministicResult.missingKeywords
-    : extractKeywordMatches(jobDescription);
+    : deterministicResult.detectedJobDomain.evidence;
 
   if (
     deterministicResult.matchScore <= 20 &&
-    deterministicResult.matchedKeywords.length === 0
+    deterministicResult.domainMismatch
   ) {
     return {
       tailoredCv: cv,
@@ -319,7 +282,7 @@ export async function tailorCvWithOllama(jobDescription: string, cv: string): Pr
       ],
       notes: [
         deterministicResult.summary,
-        "Nu este corect sa rescriem un CV DevOps ca sa para relevant pentru un rol din alt domeniu."
+        `Nu este corect sa rescriem un CV din ${deterministicResult.detectedCvDomain.label} ca sa para relevant pentru un rol din ${deterministicResult.detectedJobDomain.label}.`
       ],
       addedSkills: [],
       rejectedSkills: rejectedKeywords,

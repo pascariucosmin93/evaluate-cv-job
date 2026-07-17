@@ -6,10 +6,20 @@ export type ScoreBreakdown = {
   communication: number;
 };
 
+export type DomainInsight = {
+  key: string;
+  label: string;
+  confidence: number;
+  evidence: string[];
+};
+
 export type MatchResponse = {
   matchScore: number;
   verdict: "strong-fit" | "partial-fit" | "weak-fit";
   summary: string;
+  detectedCvDomain: DomainInsight;
+  detectedJobDomain: DomainInsight;
+  domainMismatch: boolean;
   matchedKeywords: string[];
   missingKeywords: string[];
   strengths: string[];
