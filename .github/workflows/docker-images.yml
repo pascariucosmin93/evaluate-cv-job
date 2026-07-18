@@ -119,3 +119,53 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag "docker-v$VERSION"
           git push origin "docker-v$VERSION"
+
+  update-gitops:
+    if: github.event_name == 'push'
+    needs:
+      - prepare-version
+      - build
+      - tag-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/evaluate-cv-job-gitops
+          ssh-key: ${{ secrets.GITOPS_REPO_SSH_KEY }}
+          path: gitops
+
+      - name: Update image tags in GitOps repo
+        env:
+          VERSION: ${{ needs.prepare-version.outputs.version }}
+        run: |
+          python <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("gitops/clusters/production/evaluate-cv-job/kustomization.yaml")
+          content = path.read_text()
+          version = os.environ["VERSION"]
+          content, count = re.subn(r"newTag:\s+\S+", f"newTag: {version}", content)
+          if count != 2:
+              raise SystemExit(f"Expected to update 2 image tags, updated {count}.")
+          path.write_text(content)
+          PY
+
+      - name: Commit and push GitOps changes
+        env:
+          VERSION: ${{ needs.prepare-version.outputs.version }}
+        run: |
+          cd gitops
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add clusters/production/evaluate-cv-job/kustomization.yaml
+          if git diff --cached --quiet; then
+            echo "No GitOps changes to commit."
+            exit 0
+          fi
+          git commit -m "Deploy evaluate-cv-job images ${VERSION}"
+          git push origin main

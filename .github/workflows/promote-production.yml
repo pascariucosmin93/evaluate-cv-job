@@ -3,19 +3,13 @@ name: promote-production
 on:
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ${{ github.repository_owner }}
-
 jobs:
-  promote:
+  promote-gitops:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-
     steps:
-      - name: Checkout tags
+      - name: Checkout application repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -32,24 +26,43 @@ jobs:
 
           version="${latest_tag#docker-v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Promoting version $version to latest."
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          repository: ${{ github.repository_owner }}/evaluate-cv-job-gitops
+          ssh-key: ${{ secrets.GITOPS_REPO_SSH_KEY }}
+          path: gitops
 
-      - name: Promote images to latest
+      - name: Update GitOps image tags
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          for image in evaluate-cv-job-frontend evaluate-cv-job-backend; do
-            source_image="${REGISTRY}/${IMAGE_NAMESPACE}/${image}:${VERSION}"
-            latest_image="${REGISTRY}/${IMAGE_NAMESPACE}/${image}:latest"
+          python <<'PY'
+          import os
+          import re
+          from pathlib import Path
 
-            docker pull "$source_image"
-            docker tag "$source_image" "$latest_image"
-            docker push "$latest_image"
-          done
+          path = Path("gitops/clusters/production/evaluate-cv-job/kustomization.yaml")
+          content = path.read_text()
+          version = os.environ["VERSION"]
+          content, count = re.subn(r"newTag:\s+\S+", f"newTag: {version}", content)
+          if count != 2:
+              raise SystemExit(f"Expected to update 2 image tags, updated {count}.")
+          path.write_text(content)
+          PY
+
+      - name: Commit and push GitOps changes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd gitops
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add clusters/production/evaluate-cv-job/kustomization.yaml
+          if git diff --cached --quiet; then
+            echo "No GitOps changes to commit."
+            exit 0
+          fi
+          git commit -m "Promote evaluate-cv-job ${VERSION} in GitOps"
+          git push origin main

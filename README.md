@@ -7,7 +7,7 @@ Aplicatie full-stack fara baza de date pentru evaluarea compatibilitatii dintre 
 - `frontend` - aplicatie Next.js pentru input si afisarea rezultatului
 - `backend` - API Node.js + Express care calculeaza scorul de potrivire
 - `.github/workflows/docker-images.yml` - pipeline pentru build si push imagini Docker
-- `.github/workflows/promote-production.yml` - pipeline manual pentru promovare in productie pe tag-ul `latest`
+- `.github/workflows/promote-production.yml` - workflow manual care actualizeaza repo-ul GitOps la ultimul tag Docker
 
 ## Cum functioneaza
 
@@ -36,41 +36,31 @@ Sunt doua imagini separate:
 
 Workflow-ul de GitHub Actions este pregatit pentru `GHCR`. Pentru alt registry, schimbi doar variabilele din workflow.
 
-## Promovare In Productie
+## GitOps Cu Argo CD
 
-Exista un workflow separat de promovare:
+Argo CD trebuie sa urmareasca doar repo-ul GitOps:
 
-- `.github/workflows/promote-production.yml`
+- `git@github.com:pascariucosmin93/evaluate-cv-job-gitops.git`
 
-Acesta:
+Fluxul recomandat este:
 
-- copiaza [deploy/docker-compose.production.yml](/home/cosmin/evaluate-cv-job/deploy/docker-compose.production.yml:1) pe serverul de productie
-- face `docker login` in `GHCR`
-- ruleaza `docker compose pull`
-- ruleaza `docker compose up -d`
-- foloseste imaginile `ghcr.io/pascariucosmin93/evaluate-cv-job-frontend:latest`
-- foloseste imaginile `ghcr.io/pascariucosmin93/evaluate-cv-job-backend:latest`
+1. faci push in repo-ul aplicatiei
+2. workflow-ul `docker-images` construieste si publica imaginile
+3. acelasi workflow actualizeaza tag-urile de imagine in repo-ul GitOps
+4. Argo CD detecteaza schimbarea din repo-ul GitOps si face sync in cluster
+
+Workflow-ul manual `.github/workflows/promote-production.yml` exista doar ca fallback ca sa rescrie repo-ul GitOps la ultimul tag Docker publicat.
 
 Secrets necesare in GitHub:
 
-- `PROD_SSH_HOST`
-- `PROD_SSH_PORT`
-- `PROD_SSH_USER`
-- `PROD_SSH_KEY`
-- `PROD_DEPLOY_PATH`
-- `PROD_GHCR_USERNAME`
-- `PROD_GHCR_TOKEN`
-- `PROD_OLLAMA_MODEL` optional
-- `PROD_OLLAMA_TIMEOUT_MS` optional
-- `PROD_FRONTEND_PORT` optional
-- `PROD_BACKEND_PORT` optional
+- `GITOPS_REPO_SSH_KEY`
+Acest secret trebuie sa contina cheia privata care poate face push in repo-ul `evaluate-cv-job-gitops`.
 
-Ca sa rulezi promovarea:
+Ca sa rulezi promovarea manuala:
 
 1. mergi in GitHub Actions
 2. deschizi workflow-ul `promote-production`
 3. apesi `Run workflow`
-4. lasi confirmarea pe `latest`
 
 ## Pornire Locala Cu Docker
 
